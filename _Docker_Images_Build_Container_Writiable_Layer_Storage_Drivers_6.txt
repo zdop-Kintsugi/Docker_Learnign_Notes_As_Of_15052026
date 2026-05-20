@@ -1,0 +1,258 @@
+DOCKER STORAGE DRIVERS AND TYPES IN USE FOR IMAGE LAYER CONTAINER WRITIABLE LAYER
+
+
+A Docker storage driver is a component that manages how image layers and container writable layers are stored and accessed on disk. Here’s a simple, step-by-step explanation:
+
+Docker storage drivers are not managed directly with specific docker commands; instead, they are configured at the Docker daemon level.
+
+In production, you do not use "commands" to choose a storage driver in real-time for specific builds. Instead, the storage driver is a global configuration set at the Docker daemon level. 
+
+When you build a Docker image, it’s made up of multiple read-only layers.
+When you run a container from an image, Docker adds a thin, writable layer on top (the "container layer").
+The storage driver handles how these layers are stacked and how changes are written, using a copy-on-write (CoW) strategy.
+Each container gets its own writable layer, but shares the underlying image layers with other containers.
+When the container is deleted, its writable layer is also deleted; the image remains unchanged.
+Storage drivers are used for both storing image layers and managing the writable layer of running containers.
+They are not directly involved in the docker build command, but they determine how the resulting image layers are stored.
+For write-intensive or persistent data, Docker volumes are recommended instead of relying on the storage driver’s writable layer.
+In production, choosing the right storage driver can impact performance and stability, especially for workloads that write to the container’s filesystem.
+You can check which storage driver is in use with docker info (look for Storage Driver).
+Use cases and scenarios:
+
+Storage drivers are always used for image layer management and container writable layers.
+They are not only for image building; they are also critical for running containers.
+For production, selecting the right storage driver is important for performance, but for persistent or shared data, use Docker volumes.
+Storage drivers are not directly specified in docker build or docker run commands; they are configured at the Docker daemon level.
+You only need to interact with storage drivers if you have specific performance, compatibility, or filesystem requirements.
+
+
+Storage driver is a background engine that manages how Docker stores and stacks the image layers on your disk.
+The "Stack": It uses a Copy-on-Write (CoW) system, meaning multiple containers can share the same base image files without duplicating them.
+The Writable Layer: When a container runs, the driver creates a thin "writable" layer on top for temporary file changes.
+Context: It lives entirely within the internal Docker host filesystem (usually /var/lib/docker).
+Standard: Most modern enterprise systems use the overlay2 driver by default.
+Efficiency: It allows Docker to start containers in seconds by only "linking" to existing layers.
+Resource Saving: It saves massive amounts of disk space by sharing read-only image layers across hundreds of containers.
+Internal Only: It is not meant for your "real" data (like databases); it’s just for the container's OS and app files.
+Automation: You rarely interact with it; Docker selects and manages it automatically during installation.
+Scope: It defines the "health" of your Docker engine's disk performance and stability.
+
+
+In production, a storage driver is mandatory because the Docker engine cannot function or run a container without one. However, it should never be used to store persistent business data (like a SQL database) because the "Copy-on-Write" mechanism adds overhead that slows down heavy write operations. Use it for the application code and temporary files, but offload heavy data to Volumes.
+
+Role in Image Building
+The storage driver is the "worker" behind the scenes for commands like docker build, docker commit, and docker pull. Every time you run a RUN, COPY, or ADD command in a Dockerfile, the storage driver creates a new, permanent layer on the disk. Without a storage driver, Docker wouldn't be able to "save" the progress of your image build or stack those layers efficiently.
+
+
+In production, you should select the storage driver that offers the best performance and stability for your workload and operating system. For most Linux systems, overlay2 is recommended and used by default. Some workloads or filesystems may require a different driver (like btrfs or zfs). Changing the storage driver after images and containers exist will make those resources inaccessible until you revert the change.
+
+The industry standard for production on modern Linux is overlay2. It is the default for almost all current distributions. 
+
+To explicitly set or change it, you must edit the Docker daemon configuration file, as passing runtime flags is not recommended for production stability. 
+
+File Location: /etc/docker/daemon.json.
+Configuration:
+json
+{
+  "storage-driver": "overlay2"
+}
+
+You must restart the Docker service for changes to take effect: sudo systemctl restart docker.
+Changing the driver makes existing images and containers inaccessible because each driver stores data in a different format.
+
+
+To check the current storage-driver in use 
+
+docker info | grep "Storage Driver"
+
+To view the writable layer size actual data and virtual size any read only image layer
+
+docker ps -s
+
+To inspect layer ID of SHA256 managed by driver 
+
+docker image inspect --format "{{json .RootFS.Layers}}" busybox
+
+To check if any image layer is bloated 
+
+docker image inspect --format "{{.Size}}" <image_id>
+
+To manually prune all unused images and volumes instantly
+
+docker system prune -a --volumes
+
+To monitor disk usage how much space images, containers, and volumes are consuming on your 
+
+docker system df 
+
+
+Stick to overlay2: It is the most stable and performance-balanced driver for general workloads.
+
+Avoid the Writable Layer: Even though the storage driver manages it, you should keep it "thin." For production apps that write logs or database files, always offload that data to Docker Volumes to avoid the performance overhead of the storage driver's Copy-on-Write (CoW) mechanism.
+
+Use Minimal Base Images: To make the storage driver's job easier (faster pulls and less disk churn), use small images like alpine or distroless. 
+
+For modern RPM-based systems (RHEL 8/9/10 and their clones), overlay2 is the absolute gold standard and the only driver you should use in production.
+Why overlay2 for these systems?
+Native Support: It is fully supported by the upstream Linux kernel and Red Hat’s kernel.
+XFS Compatibility: RPM-based distros typically use XFS as the base filesystem. overlay2 is optimized to work perfectly on top of XFS (provided ftype=1 is enabled, which is the default in RHEL 7.3+ and all versions of RHEL 8/9/10).
+Efficiency: It handles "Inodes" (file pointers) much better than the older devicemapper driver that used to be common on older CentOS/Red Hat versions.
+A Note on devicemapper:
+If you see old tutorials mentioning devicemapper for Red Hat—ignore them. Docker and Red Hat have deprecated devicemapper because it is slower, more complex to configure, and less stable than overlay2.
+
+Using RPM-based systems, run this to ensure your underlying disk (XFS) is compatible with overlay2:
+bash
+xfs_info /var/lib/docker | grep ftype
+Use code with caution.
+If it shows ftype=1, you are perfectly set for high-performance production builds.
+
+
+Different Storage Drivers:
+
+1. Overlay2 :
+
+The Docker overlay2 storage driver uses OverlayFS, a union filesystem, to manage image and container layers efficiently:
+
+OverlayFS combines multiple directories (layers) into one unified view.
+Image layers are stored as read-only "lowerdir" directories.
+When you create a container, Docker adds a writable "upperdir" layer on top for your changes.
+The combined view of all layers is presented in the "merged" directory, which is what the container sees as its filesystem.
+Each layer has a "diff" directory with its unique files, and a "work" directory used internally by OverlayFS.
+When files exist in both the image and container layers, the container's (upperdir) version takes precedence.
+Overlay2 supports up to 128 lower layers, improving performance for commands like docker build.
+Layer directories and their relationships can be found under /var/lib/docker/overlay2/ on the Docker host.
+To see overlay mounts and their attributes, use the Linux command:
+mount | grep overlay
+You can inspect layer directories and contents with standard Linux commands like ls and cat.
+
+ls -l /var/lib/docker/overlay2
+
+The overlay2 driver is the modern standard for Docker, using the Linux kernel's OverlayFS to merge multiple directories into a single virtual view. It manages layers using four key components: 
+LowerDir (Read-Only): These are your image layers (e.g., base OS, installed apps). They never change.
+UpperDir (Read-Write): A thin layer added when you start a container. All new data or changes you make live here.
+Merged: The "virtual" folder the container actually sees, combining the Lower and Upper layers into one.
+WorkDir: A hidden "scratch" space used by Linux to prepare files before they are finished moving to the UpperDir. 
+
+Layer Management & Creation: When you build an image, each instruction (like RUN) creates a new LowerDir on your disk. When you run a container, Docker adds one UpperDir. If you modify a file from an image layer, overlay2 uses Copy-on-Write (CoW): it copies the entire file from the "lower" layer to your "upper" writable layer before you save changes.
+
+
+To check if the overlay2 is active or not 
+
+docker info | grep "Backing Filesystem"
+
+To see the exact host paths for LowerDir, UpperDir, and Merged under the GraphDriver section
+
+docker inspect <container_id>
+
+To check on Linux active kernel-level mount point where Docker has merged your container's layers.
+
+mount | grep overlay
+
+
+2. Containerd Image Store :
+
+The containerd image store is the default image storage backend for Docker Engine 29.0 and later (on fresh installations). The image store is the component responsible for pushing, pulling, and storing images on your filesystem. The containerd image store is a modern replacement for Docker's legacy graph drivers.
+
+Instead of using "storage drivers," it uses snapshotters to manage the filesystem. 
+Content Store: When you pull an image, the compressed layers (blobs) are stored in the content store.
+Unpacking: The snapshotter extracts these blobs into uncompressed snapshots.
+Thin Layer Creation: When a container starts, the snapshotter creates a new "active" snapshot. This is the thin writable layer that sits on top of the read-only image snapshots.
+Functioning: It uses the same Copy-on-Write (CoW) logic as older drivers, ensuring that the base image remains immutable while changes are trapped in the top layer.
+
+Resource Usage & Remarks
+Disk Usage: It typically uses more disk space than overlay2. This is because it stores both the compressed blobs (for pushing/sharing) and the unpacked snapshots (for running).
+Performance: It generally has a lower operational footprint with faster startup times and lower background RAM/CPU usage compared to the full Docker daemon architecture.
+What to Watch For: Switching to the containerd store hides your old images created with overlay2. They aren't deleted, but you won't see them unless you switch back. 
+
+How it works:
+
+The containerd image store manages image layers using "snapshotters" instead of the classic storage drivers (like overlay2 or btrfs).
+When you pull or build an image, containerd stores both the compressed and uncompressed versions of each layer.
+For running containers, containerd creates a thin writable layer (using snapshotters) on top of the image’s read-only layers, so changes made by the container do not affect the original image.
+Layer management:
+
+Snapshotters handle stacking and merging of image layers, similar to how storage drivers did, but with more flexibility and features.
+Each container gets its own writable snapshot (layer) for runtime changes, while sharing the underlying image layers.
+
+Advantages over classic storage drivers:
+
+Supports building and storing multi-platform images locally, without needing external builders.
+Enables advanced features like image attestations (provenance, SBOM), Wasm containers, and pluggable snapshotters (e.g., for lazy-pulling or peer-to-peer distribution).
+The switch to containerd is mostly transparent—your Docker commands and workflows remain the same.
+Resource usage and considerations:
+
+The containerd image store uses more disk space than legacy drivers because it keeps both compressed and uncompressed layers.
+Disk usage can grow quickly, especially with many images sharing base layers, since compressed layers are not de-duplicated.
+Monitor disk usage with docker system df and prune unused images with docker image prune.
+Make sure your Docker data directory is on a partition with enough space.
+
+How it works with the Docker daemon:
+
+The Docker daemon uses containerd as its backend for image and container management.
+You do not need to change your Docker commands; the image store and snapshotters are managed automatically by the daemon.
+
+The root directory for uncompressed /var/lib/docker/containerd-snapshotter.
+
+The compressed blobs are kept in /var/lib/containerd/io.containerd.content.v1.content
+
+
+If disk space is constrained, consider the following:
+
+Regularly prune unused images with docker image prune
+Use docker system df to monitor disk usage
+Configure the data directory to use a partition with adequate space
+
+To set the containerd-snapshotter as storage-driver
+
+Add the following configuration to your /etc/docker/daemon.json file:
+
+
+{
+  "features": {
+    "containerd-snapshotter": true
+  }
+}
+Save the file and restart the daemon:
+
+sudo systemctl restart docker
+
+
+To check containerd-snapshotters are in use 
+
+docker info -f '{{ .DriverStatus }}'
+
+To check the images stored and container with containerd-snapshotters 
+
+docker image inspect <image-id>
+
+docker container inspect <container-id>
+
+To check on Linux active kernel-level mount point where Docker has merged your container's layers.
+
+mount | grep containerd
+
+Since the image store is managed here, if this service stops, Docker cannot access any images.
+
+systemctl status containerd
+
+To check for errors if an image fails to pull or a layer fails to extract.
+
+journalctl -u containerd
+
+
+Low-Level Tools (ctr & nerdctl)
+Containerd uses namespaces to isolate data. Docker data lives in the moby namespace.
+
+The native containerd tool to see the exact images Docker is using.
+
+sudo ctr -n moby images list
+
+Shows the actual "snapshots" (layers) being managed.
+
+sudo ctr -n moby snapshots list
+
+A Docker-compatible CLI for containerd that allows you to explore the image store more easily than ctr
+
+nerdctl
+
+

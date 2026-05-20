@@ -1,0 +1,54 @@
+DOCKER BIND MOUNT FOR STORAGE OF DATA 
+
+
+A bind mount directly links a file or directory from the Docker host into a container. The container accesses the exact same files as the host, and any changes made in the container are reflected on the host, and vice versa. This is different from Docker-managed volumes, which are isolated and managed by Docker itself.
+
+Read-write by default; can be set to read-only.
+
+Sharing config files, logs, or persistent data with the host.
+
+Bind mounts are suitable for:
+
+Sharing source code or build artifacts between the host and a container (commonly in development, but sometimes in production for configuration).
+
+Persisting files generated in a container directly onto the host filesystem.
+
+Sharing configuration files from the host to containers (for example, mounting /etc/resolv.conf for DNS resolution).
+
+Scenarios where you need real-time access to host files from within the container.
+
+Note: In production, bind mounts are less common than volumes due to their tight coupling to the host filesystem and potential security risks. They are mainly used when you need to share specific host files or directories with containers.
+
+When you use a bind mount:
+The content at the container's mount point (/container/path) is obscured (hidden) by the content from the host's directory (/host/path).
+Any files or directories that existed at /container/path in the container image are not accessible while the bind mount is active. Only the host's files are visible at that location inside the container.
+The container's directory at the mount point is hidden by the host's files.
+Host content is shown inside the container at the mount location.
+
+
+To use bind mount as storage, when file/directly is present we mount else it is created by using other command. 
+
+docker run -it --mount type=bind,source=/host/path,target=/container/path busybox
+
+docker run -it -v /host/path:/container/path busybox
+
+To automatically create the source path if it doesn't exist
+
+docker run -it --mount type=bind,source=/path/on/host,target=/path/in/container,bind-create-src busybox
+
+
+Read/Write Permissions
+
+Read-write (default): Omit the permission or use :rw.
+Read-only: Add :ro or readonly to the mount options.
+
+Read-Write (default):
+By default, bind mounts are read-write. Both the container and the host can modify the files.
+docker run -v /host/path:/container/path:rw busybox
+
+Read-Only:
+To add ro or readonly to make the mount read-only for the container.
+docker run -v /host/path:/container/path:ro busybox
+or
+docker run --mount type=bind,source=/host/path,target=/container/path,readonly busybox
+

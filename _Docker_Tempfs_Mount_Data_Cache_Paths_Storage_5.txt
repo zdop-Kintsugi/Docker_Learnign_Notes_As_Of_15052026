@@ -1,0 +1,41 @@
+DOCKER TEMPFS MOUNT FOR STORAGE OF DATA-Caching 
+
+
+A tmpfs mount in Docker is a temporary filesystem that stores files in the host machine's memory (RAM), not on disk. This means:
+
+Data in a tmpfs mount is ephemeral: it is lost when the container stops, restarts, or the host reboots.
+tmpfs mounts are not persisted on the Docker host or within the container's filesystem.
+They are only available when running Docker on Linux.
+Use Cases in Production:
+
+tmpfs mounts are ideal for scenarios where you need fast, temporary storage that should not persist after the container stops. Common use cases include:
+
+Caching intermediate data that doesn't need to be saved.
+Handling sensitive information (like credentials) that should not be written to disk for security reasons.
+Reducing disk I/O by keeping temporary files in memory.
+Storing large volumes of non-persistent state data to protect performance.
+Permission Sets:
+
+When creating a tmpfs mount, you can set permissions using options:
+
+ro: Read-only. The container can read files but cannot write or modify them.
+rw: Read-write (default). The container can read and write files.
+Other options include nosuid, suid, nodev, dev, exec, and noexec for controlling execution and device file behavior.
+
+To mount a tmpfs in a container with specific options:
+
+docker run --tmpfs /data:ro,size=1024,mode=1777 my_image
+This mounts a tmpfs at /data with read-only access, a size of 1024 bytes, and permissions set to 1777.
+Another example with read-write (default):
+
+docker run --tmpfs /data:rw,size=1024,mode=1777 my_image
+
+docker run --tmpfs <mount-path>[:opts]
+<mount-path>: Path inside the container.
+opts: Comma-separated list of options (e.g., ro, rw, size=, mode=).
+Limitations:
+
+tmpfs mounts cannot be shared between containers.
+Only available on Linux.
+Setting permissions may reset after container restart; setting uid/gid can help as a workaround.
+
