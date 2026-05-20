@@ -1,0 +1,214 @@
+DOCKER IPTABLES AND NETWORK COMMUNICATION CHAIN TABLE AND RULES
+
+Docker uses iptables to manage network isolation, security, and port forwarding. It creates specific custom chains that vary depending on whether you are running in Standalone or Swarm mode.
+
+Custom Iptables Chains Created by Docker : 
+Docker modifies the filter and nat tables to insert its rules. The primary chains include: 
+DOCKER-USER: A placeholder for user-defined rules. It is evaluated before any other Docker-specific rules. Use this for custom blocking or allowing.
+DOCKER: Contains the rules for individual containers (port mapping).
+DOCKER-ISOLATION-STAGE-1 & 2: Handles isolation between different Docker networks.
+DOCKER-INGRESS (Swarm only): Specifically manages traffic for the Swarm routing mesh. 
+
+In standalone mode, Docker primarily uses the Bridge network driver. It creates a virtual bridge (usually docker0) and uses NAT to route external traffic to containers.
+
+PREROUTING (nat): External traffic hitting the host is diverted to the DOCKER chain.
+DOCKER (nat): Changes the destination IP from the host's IP to the container's private IP (DNAT).
+FORWARD (filter): Checks if the traffic should be allowed through to the bridge interface.
+
+HTTPS Example (Port 443) :
+If you run a container with -p 443:443, Docker adds a rule like this:
+iptables -t nat -A DOCKER -p tcp --dport 443 -j DNAT --to-destination 172.17.0.2:443
+iptables -A DOCKER -d 172.17.0.2 -o docker0 -p tcp --dport 443 -j ACCEPT
+
+Docker Swarm Mode :
+Swarm mode introduces the Overlay network driver and the Routing Mesh. It allows any node in the cluster to receive traffic for a service and route it to the correct container on any other node.
+
+DOCKER-INGRESS (filter): This chain is added to the FORWARD chain. It ensures that traffic intended for Swarm services is correctly identified and allowed.
+IPVS (IP Virtual Server): Swarm doesn't just use iptables for load balancing; it uses the Linux kernel's IPVS to distribute traffic across service replicas using a Virtual IP (VIP).
+Mangle Table: Docker marks packets in the mangle table to help the routing mesh identify which service they belong to before they hit the load balancer. 
+
+HTTPS Example (Swarm Service) :
+For a service created with --publish published=443,target=443:
+Traffic enters any node on port 443.
+Iptables in the nat table redirects it to the Swarm load balancer (IPVS).
+IPVS picks a healthy container (task) and forwards the packet through an Overlay tunnel (VXLAN) to the destination node. 
+
+Never modify the DOCKER chain manually. If you need to restrict access (e.g., only allow specific IPs to access your HTTPS port), always apply those rules to the DOCKER-USER chain. 
+
+Iptables are more accurately is iptables/netfilter. Iptables is the userspace module, the bit that you, the user, interact with at the command line to enter firewall rules into predefined tables. Netfilter is a kernel module, built into the kernel, that actually does the filtering.
+
+The core of Linux firewall architecture lies Netfilter, a powerful framework integrated into the Linux kernel that provides packet filtering, network address translation (NAT), and other packet manipulation capabilities. Netfilter operates through various components such as tables, chains, and rules, which collectively allow administrators to control network traffic with precision.
+
+The iptables have tables pointing to a rule, rule of hierarchy and chan of traffic flow as per the rule.
+
+Tables :
+iptables are divided into several tables, each designed for specific types of processing. The most commonly used tables are:
+
+filter: This is the default table, which is used for standard packet filtering.
+nat: This table is used for Network Address Translation (NAT), typically when routing traffic between internal and external networks.
+mangle: This table is used for specialized packet alteration, often for modifying packet headers.
+raw: This table is used for packets that need special treatment before they reach the conntrack system (connection tracking).
+security: This table is used for mandatory access control (MAC) rules, such as those enforced by SELinux.
+
+Chains :
+Each table in iptables contains a set of chains, which are lists of rules that packets are checked against. The default chains are:
+
+INPUT: For incoming packets destined for the local system.
+OUTPUT: For outgoing packets originating from the local system.
+FORWARD: For packets that are routed through the system, not destined for the local system.
+PREROUTING: For packets that arrive before routing decisions are made (used in the nat and mangle tables).
+POSTROUTING: For packets that are about to leave the network interface (used in the nat and mangle tables).
+
+Rules :
+Rules are the individual filtering criteria within chains. A rule specifies what to match (like a source IP address or port) and what action to take (like ACCEPT, DROP, or REJECT).
+
+ACCEPT: The Green Light
+The packet is allowed to pass through the firewall to its intended destination.
+Action: Stops further processing in the current chain.
+Result: The packet continues its journey (either to a local process or forwarded to another network).
+Best for: Trusted traffic, like SSH from your home IP or public web traffic on port 80/443.
+
+DROP: The Silent Treatment
+The packet is simply discarded. The firewall acts like it never received anything.
+Action: The packet is deleted immediately. No response is sent back to the sender.
+Result: The sender’s connection will eventually "Time Out."
+Best for: Hiding from scanners or malicious actors. It makes your system appear "stealthy" because the sender doesn't know if the IP is active or just ignoring them.
+
+REJECT: The Formal Refusal
+The packet is blocked, but the firewall sends an error message back to the sender.
+Action: The packet is discarded, and an ICMP "port unreachable" (or similar) packet is sent to the source.
+Result: The sender’s application receives an immediate "Connection Refused" error instead of waiting for a timeout.
+Best for: Internal networks where you want to be helpful. It allows applications to fail gracefully and quickly, which is better for debugging.
+
+
+The syntax of the iptables
+
+iptables -A INPUT/OUTPUT/FORWARD/PREROUTING/POSTROUTING -p TCP/UDP --dport socket port --sport socket port -s IP address -d IP address -j ACCEPT/DROP/REJECT
+
+Where:
+
+-A adds a rule to a chain (e.g., INPUT, FORWARD, OUTPUT)
+-I to insert a rule at a specific position in a chain mostly above/below current chain
+-D remove a rule by specifying either the rule itself or its position in the chain.
+-F to delete/flush all the rules of chain
+-p specifies the protocol (tcp, udp, icmp)
+--dport defines the destination port (for TCP/UDP) and --sport defines the source port (TCP/UDP)
+-j indicates the target action (ACCEPT, DROP, REJECT, SNAT, DNAT)
+-s defines the source IP address of the computer originating connection sender
+-d defines the destination IP address of the computer original receiver 
+
+Iptables also handles Network Address Translation (NAT) and port forwarding, typically configured in the nat table.
+Network Address Translation (NAT) is a common use case for iptables, particularly when you need to translate private IP addresses to public ones, or vice versa.
+
+Masquerading (Source NAT) :
+Masquerading is a form of Source NAT (SNAT) that's commonly used for routing internet traffic from a private network through a public IP address. This is typically used in scenarios where multiple devices share a single public IP address. This command tells iptables to translate the source address of outgoing packets on the eth0 interface to the IP address of the interface itself.
+
+SNAT (No Port Change) & DNAT (No Port Change) :
+This setup changes the IP addresses while keeping the original source and destination ports intact.
+
+Outgoing Traffic (SNAT) :
+
+iptables -t nat -A POSTROUTING -o eth0 -s 192.168.1.10 -j SNAT --to-source 1.2.3.4
+
+
+Incoming Traffic (DNAT) :
+
+iptables -t nat -A PREROUTING -i eth0 -d 1.2.3.4 -j DNAT --to-destination 192.168.1.10
+
+
+Port Forwarding (Destination NAT) :
+Port forwarding involves redirecting traffic destined for a specific port on a public IP address to a different port or IP address, often within a private network. This rule redirects incoming traffic on port 8080 to port 80 on the internal IP address 192.168.1.10.
+
+SNAT (No Port Change) & DNAT (With Port Forwarding)  : 
+ 
+This setup redirects traffic to a specific internal port but maintains a static IP-to-IP mapping for outbound traffic. 
+
+Outgoing Traffic (SNAT) :
+
+iptables -t nat -A POSTROUTING -o eth0 -s 192.168.1.10 -j SNAT --to-source 1.2.3.4
+
+Incoming Traffic (DNAT with Port Translation) :
+
+iptables -t nat -A PREROUTING -i eth0 -p tcp -d 1.2.3.4 --dport 80 -j DNAT --to-destination 192.168.1.10:8080
+
+
+Basic Flags :
+-t nat: Targets the NAT table (used for IP/port alterations).
+-A PREROUTING: Appends the rule to the chain that handles packets before routing decisions (used for DNAT).
+-A POSTROUTING: Appends the rule to the chain that handles packets after routing decisions (used for SNAT).
+-i eth0: Specifies the In-Interface (the port where traffic arrives).
+-o eth0: Specifies the Out-Interface (the port where traffic leaves).
+-j: "Jump" to a target/action (DNAT, SNAT, ACCEPT, etc.).
+
+IP & Protocol Flags :
+-s: Source IP. The original sender's address.
+-d: Destination IP. The original intended receiver's address.
+-p: Protocol. Usually tcp or udp. Required if you are filtering by port. 
+
+Port Flags :
+--sport: Source Port. The port the sender is using to transmit.
+--dport: Destination Port. The port the sender is trying to reach on the destination.
+--to-destination: The new IP (and optional port) the packet is redirected to.
+--to-source: The new IP the packet will appear to come from when it leaves the system.
+
+Load Balancing with NAT :
+iptables can also be used to distribute incoming traffic across multiple servers, which provides a simple form of load balancing.
+
+These rules alternate incoming traffic between two destination servers, 192.168.1.101 and 192.168.1.102.
+
+iptables -t nat -A PREROUTING -p tcp --dport 80 -m statistic --mode nth --every 2 --packet 0 -j DNAT --to-destination 192.168.1.101:80
+
+iptables -t nat -A PREROUTING -p tcp --dport 80 -m statistic --mode nth --every 2 --packet 1 -j DNAT --to-destination 192.168.1.102:80
+
+Basics of nftables and Command Equivalents :
+nftables is the modern successor to iptables, offering a more efficient, unified framework for packet filtering. Unlike iptables, nftables does not have predefined tables or chains; you must create them yourself.
+
+nftables actually uses the Netfilter framework just like iptables does. 
+While iptables and nftables are different user-space tools with different syntax, they both act as interfaces to the same core engine inside the Linux kernel: Netfilter.
+
+Why the shift? :
+The main goal of nftables was to replace the fragmented legacy tools (iptables, ip6tables, arptables, ebtables) with a single, unified tool that simplifies kernel code and improves performance
+
+Table and Chain Creation (The Setup) :
+Before adding rules, you must define the containers.
+Create a Table: nft add table inet my_table (The inet family handles both IPv4 and IPv6).
+Create a Base Chain: This hooks into the kernel.
+nft add chain inet my_table my_input { type filter hook input priority 0 \; }
+nft add chain inet my_table my_output { type filter hook output priority 0 \; }
+nft add chain inet my_table my_forward { type filter hook forward priority 0 \; }
+
+Command Equivalents :
+Feature 				iptables Equivalent					nftables Command Snippet
+Hook				INPUT / OUTPUT / FORWARD				hook input / hook output / hook forward
+Action		-j      ACCEPT / DROP / REJECT						accept / drop / reject
+Protocol	-p   		tcp / udp							ip protocol tcp (or just tcp)
+Ports				--dport / --sport							tcp dport 80 / udp sport 53
+IP Address	-s 		1.2.3.4 / -d 	5.6.7.8					ip saddr 1.2.3.4 / ip daddr 5.6.7.8
+Subnet		-s 		192.168.1.0/24							ip saddr 192.168.1.0/24
+
+NAT: SNAT and DNAT :
+NAT rules require a table with the nat type. 
+
+SNAT (Source NAT) :
+Used for outgoing traffic to change the source IP (e.g., local network accessing the internet). 
+Without specific IP (Masquerade): nft add rule nat postrouting oifname "eth0" masquerade.
+With specific IP (SNAT): nft add rule nat postrouting oifname "eth0" snat to 1.2.3.4.
+
+DNAT (Destination NAT) :
+Used for incoming traffic to change the destination IP. 
+Simple DNAT (Incoming): Redirects all traffic for an IP to an internal host.
+nft add rule nat prerouting iifname "eth0" daddr 1.2.3.4 dnat to 192.168.1.10
+DNAT with Port Forwarding (443 to 80): Redirects traffic from an external port to an internal port on a specific host.
+nft add rule nat prerouting iifname "eth0" tcp dport 443 dnat to 192.168.1.10:80.
+
+Management via firewalld
+firewalld acts as a high-level manager that uses nftables as its default backend on modern Linux distributions (e.g., RHEL 8+, Ubuntu 20.04+). 
+
+How firewalld manages nftables :
+Abstraction: You use firewall-cmd to define "zones" and "services" instead of raw rules.
+Translation: When you run firewall-cmd --add-service=http, firewalld automatically generates the necessary nftables rules in a dedicated firewalld table.
+Dynamic Updates: It uses the Netlink API to update rules instantly without flushing the entire ruleset, preventing connection drops.
+Hierarchy: Rules are organized into chains that firewalld controls, allowing it to coexist (though not recommended) with manual nft rules.
+
+While firewalld uses nftables under the hood, avoid manually editing nftables rules while firewalld is active, as it may overwrite your changes. 
+

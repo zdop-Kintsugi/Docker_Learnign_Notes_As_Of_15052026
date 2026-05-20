@@ -1,0 +1,284 @@
+DOCKER NETWORK DRIVERS HOST CONTAINER
+
+Docker's networking subsystem is pluggable, using drivers. Several drivers exist by default, and provide core networking functionality:
+
+bridge: The default network driver. If you don't specify a driver, this is the type of network you are creating. Bridge networks are commonly used when your application runs in a container that needs to communicate with other containers on the same host. See Bridge network driver.
+
+host: Remove network isolation between the container and the Docker host, and use the host's networking directly. See Host network driver.
+
+overlay: Overlay networks connect multiple Docker daemons together and enable Swarm services and containers to communicate across nodes. This strategy removes the need to do OS-level routing. See Overlay network driver.
+
+ipvlan: IPvlan networks give users total control over both IPv4 and IPv6 addressing. The VLAN driver builds on top of that in giving operators complete control of layer 2 VLAN tagging and even IPvlan L3 routing for users interested in underlay network integration. See IPvlan network driver.
+
+macvlan: Macvlan networks allow you to assign a MAC address to a container, making it appear as a physical device on your network. The Docker daemon routes traffic to containers by their MAC addresses. Using the macvlan driver is sometimes the best choice when dealing with legacy applications that expect to be directly connected to the physical network, rather than routed through the Docker host's network stack. See Macvlan network driver.
+
+none: Completely isolate a container from the host and other containers. none is not available for Swarm services. See None network driver.
+
+We can install and use third-party network plugins with Docker.
+
+The default bridge network is good for running containers that don't require special networking capabilities.
+User-defined bridge networks enable containers on the same Docker host to communicate with each other. A user-defined network typically defines an isolated network for multiple containers belonging to a common project or component.
+Host network shares the host's network with the container. When you use this driver, the container's network isn't isolated from the host.
+Overlay networks are best when you need containers running on different Docker hosts to communicate, or when multiple applications work together using Swarm services.
+Macvlan networks are best when you are migrating from a VM setup or need your containers to look like physical hosts on your network, each with a unique MAC address.
+IPvlan is similar to Macvlan, but doesn't assign unique MAC addresses to containers. Consider using IPvlan when there's a restriction on the number of MAC addresses that can be assigned to a network interface or port.
+Third-party network plugins allow you to integrate Docker with specialized network stacks.
+
+
+Bridge Network Driver :
+
+The bridge network driver is Docker’s default networking mode for standalone containers. It creates a private internal network on a single host, allowing containers to communicate with each other while remaining isolated from external networks unless explicitly permitted.
+
+The bridge network driver is used in production, but with one massive condition: you should only use user-defined bridges, never the default docker0 bridge.
+
+Internally, the bridge driver uses standard Linux networking primitives to create a virtual software switch of Layer 2 on OSI like data link layer bridge.
+
+Virtual Bridge Interface: When Docker starts, it typically creates a virtual bridge interface named docker0. This acts like a network switch.
+veth Pairs: For every container, Docker creates a veth pair (virtual Ethernet pair), which functions like a virtual network and virtual cable. One end is placed inside the container's network namespace as eth0. The other end is attached to the host's bridge (docker0 or a custom bridge).
+IP Allocation: Each container receives a unique IP address from the bridge's subnet (e.g., 172.17.0.0/16 for the default bridge). 
+
+Key Characteristics :
+Default Network: When Docker starts, it automatically creates a default bridge network called bridge. Unless specified otherwise, new containers connect to this network.
+User-Defined Networks: You can create custom bridge networks using docker network create. User-defined bridge networks are superior to the default bridge network because they offer more flexibility and features.
+Container Communication: Containers on the same bridge network can communicate freely. Communication with containers on other networks or from outside the Docker host is blocked by default.
+External Access: Containers can access external networks (like the internet) via masquerading (NAT). Devices on external networks only see the Docker host’s IP address.
+Port Publishing: To allow access to a container from outside the Docker host, you must publish ports. This forwards traffic from the host’s IP and port to the container’s port.
+
+1. Default vs. User-Defined Bridges
+There is a massive functional difference between the automatic docker0 bridge and custom bridges created via docker network create. 
+DNS Resolution: User-defined bridges include a built-in DNS server at 127.0.0.11 that automatically resolves container names to IP addresses. The default bridge does not; containers can only reach each other via IP address unless legacy --link is used.
+Isolation: All containers on the default bridge can talk to each other by default. User-defined bridges provide better scoping, ensuring only related services are on the same segment.
+Live Configuration: You can connect or disconnect a container from a user-defined bridge without stopping it. To change a container's default bridge settings, you must recreate the container. 
+
+Attaching/Detaching Containers: With user-defined bridge networks, you can connect or disconnect containers on the fly. With the default bridge, you must stop and recreate the container to change its network.
+Configuration: User-defined bridge networks are created and configured using docker network create, allowing different settings for different networks. The default bridge network’s configuration is global and requires Docker to be restarted for changes.
+Environment Variable Sharing: The legacy --link flag allowed containers on the default bridge to share environment variables. This is not supported on user-defined bridges, but there are better alternatives (like shared volumes or Docker Compose).
+Port Exposure: Containers on the same user-defined bridge network can access each other’s ports directly. To access a container from another network or from outside, you must publish the port.
+
+Traffic Flow and iptables :
+Docker manages traffic entering and leaving the bridge using host iptables rules.
+Outbound (Egress): Containers reach the internet via NAT (Masquerading). Their private IP is replaced with the host's IP as traffic leaves the host.
+Inbound (Ingress): For external clients to reach a container, you must use Port Publishing (-p or --publish). Docker creates DNAT rules to forward specific host ports to container IPs.
+Inter-Container (ICC): Communication between containers on the same bridge is controlled by the enable_icc flag (default is true). If disabled, Docker adds DROP rules to the FORWARD chain to block all inter-container traffic on that bridge. 
+
+Limitations & Scalability :
+Single-Host Only: Bridge networks cannot span multiple physical hosts. For multi-host setups, you must use the Overlay driver.
+Kernel Limits: A single bridge network may become unstable if more than 1,000 containers are connected to it due to Linux kernel limitations.
+IPv6 Support: While supported, IPv6 is not enabled by default and requires manual configuration in the Docker daemon or during network creation. 
+
+When Bridge is Used in Production : 
+User-defined bridge networks are the standard for single-host production deployments. 
+Best for: Small to medium apps, single-server SaaS, or isolated side-car services.
+Why it's used: It offers the best balance of security/isolation and automatic service discovery (DNS resolution by container name).
+Why the "Default" Bridge is avoided: The default docker0 bridge lacks automatic DNS, requiring you to manually link IP addresses, which are unstable and change whenever a container restarts. 
+Single Host Networking: Bridge networks are ideal for communication between containers on the same Docker host.
+Project Isolation: User-defined bridge networks are useful for isolating groups of containers (e.g., for different applications or environments) on the same host.
+
+What Else is Used in Production?
+If your application grows beyond a single server, the bridge driver is no longer sufficient. Instead, production environments typically move to one of these: 
+Overlay Driver (Multi-Host):
+The "standard" for Docker Swarm clusters.
+It creates a virtual network that spans multiple physical servers, allowing containers on Host A to talk to Host B as if they were on the same local switch.
+Host Driver (High Performance):
+Used when network performance is the absolute priority.
+It removes isolation entirely, giving the container direct access to the host's network stack. This is common for high-throughput load balancers or monitoring tools.
+Cloud/Orchestrator Networking (Kubernetes):
+Most large-scale production environments use Kubernetes (K8s).
+Kubernetes does not use the standard Docker bridge for cross-node communication; it uses its own networking model (CNI) to ensure every Pod has a unique, routable IP across the entire cluster.
+
+To create a user-defined bridge network
+
+docker network create -d bridge --subnet 172.25.0.0/16 my-bridge-net
+
+To lists all networks, including the default bridge, user-defined bridges, host, and none.
+
+docker network ls
+
+To inspect network details.
+
+docker network inspect my-bridge-net
+
+To connect a container to a user-defined bridge network.
+
+docker network connect my-bridge-net busybox
+
+To disconnects a running container from a user-defined bridge network.
+
+docker network disconnect my-bridge-net busybox
+
+To removes a user-defined bridge network. You must disconnect all containers first.
+
+docker network rm my-bridge-net
+
+To starts a container attached to a specific bridge network.
+
+docker run --network my-bridge-net busybox
+
+
+Overlay Network Driver :
+
+The Docker overlay network driver creates a distributed network that spans multiple Docker daemon hosts, enabling containers connected to it to communicate securely and directly, regardless of which physical node they reside on. It abstracts the underlying network (underlay), handling encapsulation and routing seamlessly.
+The overlay network driver creates a distributed network across multiple Docker daemon hosts. It sits on top of host-specific networks, enabling containers on different hosts to communicate securely (especially when encryption is enabled). Docker handles routing transparently between hosts and containers.
+
+Overlay networks are automatically created on swarm worker nodes as needed, but aren't automatically removed.
+
+In nodes of the swarm cluster if any of the containers(not services) using the overlay network driver created by user is stoped using they will be removed automatically from that node except on the node it was created.
+
+Services or containers can be connected to more than one network at a time. Services or containers can only communicate across networks they're each connected to.
+
+As we need swarm mode in operation when done so docker has more network drivers like ingress(default one created as swarm mode active overlay driver), docker_gwbridge(bridge driver), host(host driver), bridge(bridge driver exiting one), none(null driver that is none).
+The docker_gwbridge connects the ingress network to the Docker host's network interface. If you create services without specifying a network, they connect to ingress. It's recommended to use separate overlay networks for each application or group of related applications.
+The default ingress driver publish mode means you can browse to port published(8080:80 or 8443:443) on any node and connect to one of the node having service tasks, even if no tasks run on that node it will listen and do auto forward it to the service node having it. 
+
+Key Characteristics :
+Distributed: Spans multiple Docker hosts.
+Secure: Supports encrypted communication.
+Swarm integration: Used extensively with Docker Swarm for service networking.
+Automatic routing: Docker manages packet routing between hosts and containers.
+Isolation: Containers/services can only communicate across networks they’re connected to.
+VXLAN Encapsulation: Wraps Layer 2 Ethernet frames in Layer 4 UDP packets.
+Distributed Control Plane: No central "router"; nodes share endpoint info via Gossip protocol.
+Scale: Can span thousands of nodes and support thousands of virtual subnets.
+Multi-tenancy: Different teams can use the same IP ranges on different overlays without collision.
+Automatic DNS container discovery only works with unique container names.
+
+Use Cases :
+Connecting containers/services across multiple Docker hosts.
+Enabling communication between Swarm services.
+Connecting standalone containers on different hosts (requires Swarm mode). When using standalone containers, it's still required that you use Swarm mode to establish a connection between the hosts.
+Overlay networks are best suited for scenarios where containers need to communicate across hosts, or when multiple applications work together using Swarm services.
+
+Multi-host Application Deployment: Essential for connecting containers spread across multiple servers.
+Docker Swarm Services: The default network for Swarm, allowing load-balanced communication between service replicas across nodes.
+Secure Microservices: Supports end-to-end IPsec encryption between nodes for compliant applications.
+Multi-tenant Environments: Allows creating isolated network segments across a shared infrastructure.
+
+In enterprise production environments, User-Defined Overlay Networks are used exclusively. The "built-in" default networks (like the default bridge or ingress) are rarely used for application traffic because they lack service discovery, security isolation, and customization.
+
+Enterprise Choice: User-Defined Overlays :
+User-defined overlay networks are recommended for production.
+The default ingress overlay network is used for published ports, but it’s best practice to use separate overlay networks for each application or group of related applications.
+Enterprises use User-Defined Overlays because they offer:
+Automatic DNS: Containers talk via service names, not volatile IPs.
+Network Isolation: Only specific microservices can talk to each other.
+Security: Support for IPSec encryption (AES) out of the box.
+Control: Ability to define specific subnets and IP ranges (IPAM). 
+
+Conflicts with iptables/nftables/firewalld :
+Overlay networks rely on iptables or nftables for encapsulation (VXLAN) and port management. 
+firewalld Conflict: firewalld often assumes total control of the host's firewall rules and can conflict with Docker’s dynamic rules.
+Conflict Scenario: Using firewalld with an nftables backend alongside Docker (which creates iptables rules) can break network connectivity.
+Solution: Either use --iptables=false in Docker and manually manage nftables (not recommended for beginners) or ensure firewalld is properly configured to allow Docker's traffic, preferably by switching firewalld to use iptables instead of nftables.
+Required Ports firewall must allow:
+2377/tcp: Swarm cluster management.
+7946/tcp/udp: Node communication.
+4789/udp: VXLAN overlay traffic.
+
+Requirements for Implementation :
+Swarm mode must be enabled to use overlay networks across hosts, even for standalone containers.
+Overlay networks are only accessible to hosts participating in the Swarm.
+No mention in the knowledge base about specific requirements regarding iptables/nftables/firewalld, but overlay networks abstract away OS-level routing.
+Docker Hosts: At least two servers with Docker installed.
+Network Connectivity: All hosts must be able to communicate with each other.
+Docker Swarm Mode: Swarm mode must be initialized (docker swarm init).
+Key-Value Store: Built-in Raft consensus is generally used, but consul, etcd, or zookeeper are required for complex, non-Swarm setups. 
+
+Traffic Flow: Overlay vs. Bridge :
+Overlay networks route traffic between containers/services across hosts.
+Docker handles routing, so you don’t need to manage OS-level routing.
+The default ingress overlay network is used for published ports, allowing access to services from any node.
+Unlike bridge networks (which are local to a single host), overlay networks allow cross-host communication.
+
+Bridge Network (Single Host): Packets travel from the container to a local Linux bridge (docker0), then directly to the host's physical network interface.
+Overlay Network (Multi-Host):
+Container A sends data to Container B (on another host).
+The packet is received by the docker_gwbridge on the local node.
+The overlay driver wraps (encapsulates/encrypted) the container packet in a VXLAN header. Enabled IPsec encryption at the VXLAN level.
+The encrypted/encapsulated packet travels over the physical network (underlay) to the destination host's IP.
+Packet is wrapped in a VXLAN header + UDP header. Packet travels over the physical eth0 to the destination host's IP.  
+The destination host removes the VXLAN wrapper and delivers the packet to Container B.
+Destination host strips UDP/VXLAN headers and routes to the local container.
+Performance Impact: Overlay is generally slower than host/bridge networking due to encapsulation/encryption overhead. 
+
+Open Firewall Ports:
+
+firewall-cmd --permanent --add-port=2377/tcp
+firewall-cmd --permanent --add-port=7946/tcp --add-port=7946/udp
+firewall-cmd --permanent --add-port=4789/udp
+firewall-cmd --reload
+
+To work and use overlay network driver firt our swarm cluster should be initialized.
+
+docker swarm init --advertise-addr <PUBLIC_IP>
+
+To create an encrypted production grade IP-Sec security
+
+docker network create --driver overlay --opt encrypted  --attachable my-secure-net
+
+or
+
+docker network create --scope=swarm --attachable -d overlay my-secure-net
+
+To allow standalone containers to join, and --opt encrypted for security.
+
+docker network create \
+  --driver overlay \
+  --attachable \
+  --opt encrypted \
+  --subnet 10.0.50.0/24 \
+  my-secure-net
+
+To attach swarm service to an overlay network driver 
+
+docker service create \
+  --name my-nginx \
+  --publish target=80,published=80 \
+  --replicas=5 \
+  --network my-secure-net \
+  nginx
+  
+or 
+
+docker service create --name web_app --network my-secure-net nginx
+
+To attach standalone contianer to overlay network driver 
+
+docker run -d --name worker --network my-secure-net alpine sleep 1d
+
+To check network metadata for connected endpoints and IPAM
+
+docker network inspect my-secure-net
+
+To list the network drivers of overlays we have created and in use
+
+docker network ls 
+
+To check nodes with networks
+
+docker node ls --filter role=manager
+
+docker node ls --filter role=worker
+
+To move or switch or change the network of overlay's drivers of different services connections
+
+docker service update \
+  --network-add new-overlay \
+  --network-rm old-overlay \
+  my-nginx
+
+To test real time connectivity use of toolbelt containers to ping/curl 
+
+docker run --rm --network my-secure-net nicolaka/netshoot nslookup web_app
+
+To delete and remove overlay network driver, network cannot be deleted if services are still attached.
+
+docker network rm my-secure-net
+
+docker service rm my-secure-net
+
+
+If containers can't communicate :
+Check Ports: Ensure UDP 4789 is open between all physical hosts.
+Verify Encryption: Encrypted overlays require the esp protocol (IP protocol 50) to be allowed in your hardware firewall.
+MTU Mismatch: VXLAN adds 50 bytes of overhead. If your physical network is 1500, set the overlay MTU to 1450 to avoid packet fragmentation.
+

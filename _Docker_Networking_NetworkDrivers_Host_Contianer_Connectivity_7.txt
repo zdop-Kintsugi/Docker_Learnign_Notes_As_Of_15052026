@@ -1,0 +1,195 @@
+DOCKER NETWORKING AND DRIVERS OF NETWORK 
+
+A Docker network lets containers communicate with each other and with external services. Each container gets its own network interface, IP address, and can access the internet if the Docker host can. By default, containers are attached to a "bridge" network, but you can create and use other networks as needed.
+
+Docker networking is built on standard Linux networking primitives, primarily Network Namespaces, Virtual Ethernet (veth) pairs, Linux Bridges, and iptables/nftables. 	
+
+Network Adapters: The "Virtual Cable" (Network NIC + Cable) from VETH :
+
+Docker uses two main types of virtual network interfaces to connect containers to the host:
+
+veth pairs: These act like a virtual Ethernet and virtual cable with two ends.
+Container end: Moved into the container's namespace and renamed to eth0 connected from veth (L2 switch).
+
+Host end: Stays in the host's namespace and is attached to a virtual bridge (e.g., docker0).
+Linux Bridge (docker0): A software-defined Layer 2 switch created on the host.
+It manages traffic between containers on the same subnet.
+It allows containers to share a single network segment, avoiding the need for complex point-to-point connections. 
+
+A network namespace is a Linux kernel feature that provides an isolated copy of the network stack. 
+
+Unique Stack: Each container gets its own namespace, meaning it has its own private IP addresses, routing tables, and socket tables.
+Visibility: Processes inside a namespace only see their own local interfaces (like eth0 and lo) and cannot see the host's physical NICs unless explicitly connected.
+Management: Docker uses tools like runc to create these namespaces when a container starts. 
+
+
+Docker heavily manipulates the host's iptables to manage security and connectivity. 
+
+IP and Port Mapping, SNAT, DNAT
+Port Mapping:
+Docker sets up NAT rules so that traffic to a host port is forwarded to a container port.
+DNAT (Destination NAT):
+Used for port publishing—traffic to a host port is redirected to the container’s IP and port.
+SNAT (Source NAT/Masquerading):
+Outbound traffic from containers is masqueraded to appear as if it comes from the host.
+
+Port Mapping (DNAT): When you publish a port (e.g., -p 80:80), Docker adds a rule to the nat table. This rewrites the destination IP from the host's IP to the container's private IP.
+Masquerading (SNAT): For outbound traffic (container to internet), Docker uses "masquerading." This rewrites the source IP of packets to the host's IP so they can reach the external world and receive replies.
+Isolation: Docker creates custom chains like DOCKER-ISOLATION-STAGE-1 to prevent unauthorized traffic between different Docker networks.
+Custom Rules: The DOCKER-USER chain is provided specifically for users to add their own firewall rules that Docker will not overwrite. 
+
+Docker uses iptables to manage container networking, enforce isolation, and implement port mapping.
+Docker automatically creates iptables rules in the host's network namespace for bridge networks. These rules handle network isolation, port publishing, and NAT/masquerading. Disabling Docker’s iptables management is not recommended, as it will likely break container networking.
+
+Custom iptables Chains Created by Docker :
+DOCKER-USER: Placeholder for user-defined rules, processed before Docker’s own chains. You can add custom rules here to allow or restrict traffic.
+DOCKER-FORWARD: First stage for Docker network traffic. Handles forwarding decisions and established connections.
+DOCKER, DOCKER-BRIDGE, DOCKER-INTERNAL: Handle port forwarding and determine if packets not part of established connections should be accepted, based on container port mappings.
+DOCKER-CT: Per-bridge connection tracking.
+DOCKER-INGRESS: Handles Swarm networking.
+Docker adds rules in the main FORWARD chain to jump to these custom chains.
+
+Policy Mechanism
+When Docker enables IP forwarding, it sets the default policy of the iptables FORWARD chain to DROP. This means packets are dropped unless explicitly accepted by rules in Docker’s chains.
+You can check the current policy with: iptables -L FORWARD
+To allow forwarding, set the policy to ACCEPT: iptables -P FORWARD ACCEPT
+
+IP and Port Mapping (SNAT, DNAT)
+Port Mapping: Docker sets up NAT rules so that traffic to a host port is forwarded to a container port (e.g., docker run -p 8080:80 ...).
+DNAT (Destination NAT): Used for port publishing—traffic to a host port is redirected to the container’s IP and port.
+SNAT (Source NAT/Masquerading): Outbound traffic from containers is masqueraded to appear as if it comes from the host.
+
+Forwarding
+Docker requires IP forwarding to be enabled (net.ipv4.ip_forward=1).
+The FORWARD chain policy is set to DROP by default for security, but Docker’s rules allow necessary traffic for containers.
+If you need to allow more traffic, adjust the FORWARD policy or add explicit ACCEPT rules.
+
+
+On distributions like RHEL, CentOS, or Fedora that use firewalld, Docker creates specific integrations to avoid conflicts. 
+Docker Zone: Docker creates a docker zone in firewalld with an ACCEPT target.
+Interface Binding: All bridge interfaces created by Docker (like docker0) are automatically placed into this docker zone.
+Forwarding Policy: A policy called docker-forwarding is created to allow traffic to flow from external zones into the Docker network.
+Conflict Note: Because Docker works directly with iptables, it can sometimes bypass standard firewalld or UFW rules. For example, published ports may be accessible even if the host firewall seems to block them, because Docker's rules are processed first in the FORWARD chain. 
+For the conflict of docker with iptables causing when used with firewalld for port block it is shifting to nftables.
+
+
+Docker’s nftables tables :
+For bridge networks, Docker creates ip docker-bridges and ip6 docker-bridges tables.
+Each table contains several base chains, and additional chains are added for each bridge network.
+Unlike iptables, nftables does not have a fixed set of chains. You can create your own tables and chains with the same hook points and priorities as Docker’s chains.
+There is no DOCKER-USER chain in nftables. To insert custom rules, create your own table and chain with the appropriate hook and priority (e.g., type filter hook forward priority filter;).
+
+IP Forwarding :
+Docker requires IP forwarding to be enabled (net.ipv4.ip_forward=1, net.ipv6.conf.all.forwarding=1).
+If not enabled, Docker will fail to start bridge networks.
+FORWARD Policy :
+If the iptables FORWARD chain policy is DROP, packets accepted by nftables may still be dropped by iptables. Set the policy to ACCEPT to avoid this.
+
+Enabling Forwarding:
+Ensure net.ipv4.ip_forward=1 and/or net.ipv6.conf.all.forwarding=1 are set.
+You can use systemd-sysctl or edit /etc/sysctl.d/99-sysctl.conf.
+
+
+Overlay network rules are not yet migrated to nftables; nftables cannot be enabled in Swarm mode.
+
+
+Step-by-Step Packet Flow :
+When an external client sends a packet to a container's published port (e.g., -p 8080:80), it follows this path:
+Ingress: The packet arrives at the host's physical interface (e.g., eth0).
+PREROUTING (NAT): The host's iptables NAT table intercepts the packet. It sees a rule mapping host port 8080 to container IP 172.17.0.2:80.
+DNAT: The destination address is rewritten (Destination NAT) from the host's IP to the container's private IP.
+FORWARD Chain: The packet moves to the FILTER table. iptables checks the DOCKER chain to ensure traffic to this container is allowed.
+Bridge Crossing: The packet enters the docker0 bridge. The bridge acts as a switch, identifying which veth pair corresponds to the container's MAC address.
+Namespace Entry: The packet travels through the "virtual cable" (veth), crossing from the host's network namespace into the container's namespace.
+Delivery: The packet arrives at the container's eth0 and is processed by the application (e.g., Nginx).
+
+
+Types of Network Drivers & Use Cases :
+bridge: Default for single-host setups. Good for apps running on the same machine that need to talk to each other.
+host: Removes isolation; the container uses the host’s network directly. Useful for performance or when you need the container to behave like a process on the host.
+overlay: Connects containers across multiple Docker hosts (machines). Used in Docker Swarm for distributed applications.
+macvlan: Makes containers look like physical devices on your network, each with its own MAC address. Useful for legacy apps or when you need containers to appear as real devices.
+ipvlan: Similar to macvlan but doesn’t assign unique MAC addresses. Good when there are limits on MAC addresses.
+none: Completely isolates the container from all networks.
+third-party plugins: For integrating with specialized or external network systems.
+
+
+In production:
+
+Use bridge for simple, single-host setups.
+
+Use overlay for multi-host or Swarm clusters.
+Overlay Networks
+Purpose: Connects containers across different physical hosts (Docker Swarm or Kubernetes).
+Mechanism: Uses VXLAN encapsulation. It wraps Layer 2 Ethernet frames into Layer 3 UDP packets.
+Key Benefit: Containers on Host A can talk to containers on Host B as if they were on the same local switch.
+Control Plane: Requires a key-value store (like the one built into Swarm) to manage IP assignments and service locations.
+
+Use macvlan/ipvlan for advanced networking needs or integration with physical networks. Provides advanced control over network addressing and integration with physical networks. Assigns a unique MAC address to each container, making it appear as a physical device on your network. It bypasses the Docker bridge (docker0) and connects containers directly to the host's physical interface. Extremely low latency and high throughput. Ideal for legacy apps that expect to be on a physical subnet. The host's NIC must support "promiscuous mode" or sub-interfaces.
+
+Connecting Multiple Networks & Docker Containers :
+You can create user-defined networks and attach containers to them. Containers on the same network can talk to each other directly.
+Containers can be connected to multiple networks for complex setups.
+Overlay networks allow containers on different hosts to communicate (useful in Swarm).
+
+Port Publishing, Host/Container IP, Subnet, Hostname
+Port Publishing: Lets you access a container’s service from outside the Docker host. You map a port on the host to a port in the container (e.g., -p 8080:80 maps host port 8080 to container port 80).
+IP Address: Each container gets an IP address from the network’s subnet.
+Subnet: The range of IP addresses available for containers on a network.
+Hostname: Each container has a hostname (by default, its container ID or a custom name you set).
+
+Docker DNS (How It Works) : 
+Docker provides built-in DNS for containers. Each container can resolve the names of other containers on the same user-defined network.
+The DNS service is automatic—no extra setup is needed for most cases.
+On the default bridge network, containers can’t resolve each other by name unless you use user-defined networks.
+
+Service Discovery and Internal DNS
+Docker includes an embedded DNS server that allows containers to communicate by name instead of IP.
+The DNS Resolver: Every container has a DNS resolver at 127.0.0.11. You can see this in /etc/resolv.conf inside any container.
+The Process:
+Container A pings Container_b.
+The request hits 127.0.0.11.
+Docker's internal engine looks up the container name in its local store.
+It returns the private IP (e.g., 172.18.0.3).
+User-Defined Networks: Internal DNS only works on custom networks (created via docker network create). It does not work on the default bridge network.
+External Queries: If the container looks up an external address (like google.com), the internal DNS forwards the request to the host's configured DNS servers.
+
+Docker creates firewall rules for bridge networks.
+No rules are created for ipvlan, macvlan or host networking.
+
+Docker and firewalld :
+When firewalld is enabled, Docker creates a firewalld zone named docker with target ACCEPT.
+All Docker bridge interfaces (like docker0) are added to this zone.
+Docker also creates a forwarding policy called docker-forwarding that allows forwarding from any zone to the docker zone, ensuring container traffic is properly routed.
+
+Routing Mechanism :
+Docker sets up firewall rules (iptables/nftables) to implement network isolation, NAT/masquerading, and port publishing for bridge networks.
+These rules ensure that traffic is routed correctly between containers, the host, and external networks, while enforcing isolation and published port access.
+
+Port Publishing (Docker) :
+Port publishing makes a container’s port accessible from outside the Docker host.
+Use -p or --publish to map a host port to a container port (e.g., -p 8080:80).
+Docker sets up firewall rules and NAT to forward traffic from the host to the container.
+By default, published ports are open to the world unless you bind to 127.0.0.1 for localhost-only access.
+Publishing is insecure by default; anyone can access the published port unless restricted.
+
+Port Mapping (Docker) : 
+Port mapping connects a port on the Docker host to a port inside the container.
+You can specify the protocol (TCP/UDP) and the host IP address to bind.
+Example: -p 127.0.0.1:8080:80 only allows access from the host itself.
+Without a host IP, the port is accessible on all host interfaces.
+Mapping can be done for both IPv4 and IPv6 addresses.
+
+Direct Routing and Direct Routing to Containers with Bridge Network : 
+Normally, containers on bridge networks aren’t directly reachable from outside; only published ports are.
+Direct routing lets external hosts access container IPs without NAT, if routing is set up.
+Enable direct routing with Docker’s allow-direct-routing option or trusted interfaces.
+Example: Set up static routes or use BGP so remote hosts can reach the container network via the Docker host.
+You can restrict direct routing to specific interfaces using network options. For example, within a local layer 2 network, remote hosts can set up static routes to a container network via the Docker daemon host's address on the local network.
+
+Gateway Mode :
+Gateway mode controls how Docker handles NAT, routing, and firewall rules for bridge networks.
+Modes: nat (default, uses NAT), nat-unprotected (no port filtering), routed (no NAT, uses direct routing), isolated (no external access).
+In nat mode, only published ports are accessible from outside.
+In routed mode, containers use their own IP for outgoing traffic, and remote hosts need a route to the container network.
+Choose the mode based on your network needs and security requirements.
