@@ -1,0 +1,233 @@
+DOCKER CONTAINER, CONTAINER LIFECYCLE MANAEGMENT
+
+Containers are one of the four types of object of docker.
+
+A container is a lightweight, isolated environment that packages an application and its dependencies while sharing the host operating system kernel. Run in their own namespaces specified in cgroup (cgroupns) with systemd cgroupfs driver.
+
+Containers are isolated processes for each of your app's components. 
+Each component - the frontend React app, the Python API engine, and the database - runs in its own isolated environment, completely isolated from everything else on your machine.
+
+Containers are:
+
+Self-contained. Each container has everything it needs to function with no reliance on any pre-installed dependencies on the host machine.
+Isolated. Since containers run in isolation, they have minimal influence on the host and other containers, increasing the security of your applications.
+Independent. Each container is independently managed. Deleting one container won't affect any others.
+Portable. Containers can run anywhere! The container that runs on your development machine will work the same way in a data center or anywhere in the cloud!
+
+Container have their own namespaces that have been created under the linux processes.
+These containers have their storage, network, cpu and ram-memory access specified or created by docker engine using container runtime in their respective namespaces.
+When containers have been running they have their own PID that is it gets an PID of its own from the Linux System process and the internal process PID that are inside of the container starting from PID 1. It is mostly an application process.
+A container runtime is the execution layer that turns container images into isolated processes on a host.
+The container runtime used by docker engine is containerd.
+
+A container runtime is the software layer that takes a container image and runs it as an isolated container process on a host, managing the full container lifecycle from pulling and unpacking the image to configuring namespaces, cgroups, networking, and storage, starting the process, and cleaning up when it exits. Tools like Docker Engine, containerd, and other high-level container runtimes act as or use a low-level container runtime to actually run containers, while platforms such as a Kubernetes cluster use the Container Runtime Interface (CRI) to communicate with these runtimes and coordinate container orchestration across nodes.
+
+Here are the keyways it is defined in this context:
+
+It exposes a stable API that the container engine uses instead of managing low-level OS details directly.
+It converts a container image into a runnable filesystem and processes, effectively making containers on demand.
+It configures isolation primitives (namespaces, cgroups, filesystem, networking) for Linux and Windows containers where supported.  
+It reports container state (starting, running, stopped) back to the engine or orchestrator for scheduling and health decisions.
+It ensures consistent runtime behavior across different hosts so higher-level platforms can treat containers as portable units of computer.
+
+
+Modern container environments, it handles Image Pulling from registries, Image Unpacking into a runnable filesystem, and continuous Container Lifecycle operations so workloads run in consistent OS isolation across hosts.
+
+Here is how a container runtime works in practice:
+
+Receives a run request through an API
+It is called by a container engine or Kubernetes CRI and is asked to create or stop each container on the node.
+Pulls and unpacks the image
+It performs Image Pulling of the required container image from registries , a read only layered package that includes the application, its dependencies, and base OS userland and then performs Image Unpacking into a root filesystem within the container that the runtime can mount and execute.
+Sets up isolation and resources
+It configures namespaces, cgroups, network, and storage so the container can only see its allowed view of the system, forming a secure runtime boundary.  
+Starts and monitors the main process
+It launches the container entrypoint, the default command defined in the image, keeps the process running as an isolated unit, and tracks basic container health and status.
+Cleans up on exit
+It removes namespaces, unmounts filesystems, and frees resources so the container ecosystem on the host stays clean.  
+
+Here is how runtimes manage resource allocation and cleanup in practice:
+
+Define and enforce limits per container
+The container runtime is a software layer that applies CPU, memory, and I O limits via cgroups so every container cannot starve other running applications. Cgroups, or control groups, are a Linux kernel feature that group processes together and enforce resource limits and priorities on them.
+Isolate containers from host and peers
+As runtimes interact with the kernel, they use namespaces so resources visible within a container are scoped and protected from the host or other containers.
+Expose usage through tools and APIs
+Container runtime tools and a container engine that implements an API for container operations read cgroup stats to show per-container usage and support best practices for tuning.
+Tear down resources on exit
+When a container stops, the runtime deletes its cgroups, namespaces, and temporary data, allowing various container runtimes to reuse host resources without manual cleanup.
+
+
+The container lifecycle defines how a container is created, runs, pauses, updates, and eventually retires. 
+How container images are built, how containers behave at runtime, and how platforms like Docker and Kubernetes manage transitions. 
+Container lifecycle is the sequence of lifecycle stages a container passes through from building a container image to final termination.
+
+It defines how platforms such as Docker containers and Kubernetes run containers, transition them between states like created, running, pause, and restart, and eventually stop the container or retire it. 
+These transitions shape how the main process behaves inside the container, how environment variables are applied, and how workloads communicate during execution.
+
+The lifecycle flow typically includes image creation from a base image, container instantiation using a runtime such as the Docker daemon, active execution where the container is running, suspension with the Docker pause command, controlled shutdowns via SIGTERM or Docker stop, and final cleanup when the platform deletes a container
+
+A container image is created during the initial stage of creating in the container’s lifecycle, where the application, dependencies, and filesystem layers are packaged into a reusable artifact.  
+This stage provides the groundwork for container security, performance, and consistency across container runtimes.
+
+A typical lifecycle includes:
+
+Image creation and build: Where the application and dependencies are packaged. This stage of creating and building forms the immutable image a container will run.  
+Container instantiation: Where the runtime converts the image into a live instance. A container involves setting up namespaces, cgroups, which control and limit CPU, memory, and I O resource usage, and configuration before execution.  
+Running state: Where the application executes, similar to a lightweight process compared to a virtual machine. This is where most operational activity happens.  
+Monitoring and health evaluation: Where effective monitoring strategies require visibility into performance, failures, and behavior across distributed systems.  
+Updating and patching: Where routine patch management addresses outdated components and patch management addresses any vulnerabilities detected during runtime.  
+Termination and cleanup: Where the container stops, frees resources, and leaves no persistent footprint unless explicitly configured.
+
+Image creation typically involves:
+
+Building layers: Using docker images or base images pulled from registries like Docker Hub.  
+Defining instructions in a Dockerfile: To assemble the filesystem, configuration, and runtime behavior by declaring how the image is built, which base image to use, what dependencies to install, and how the container should run..  
+Embedding application logic: Such as binaries for a web server, environment variables, and required libraries.  
+Applying trust and integrity controls: Where docker content trust ensures the image is verified before use.  
+Producing a reusable artifact: Which becomes the source for every new container, whether started with docker compose or launched via the use the docker run command.
+
+Containers are monitored throughout their lifecycle by tracking performance, resource usage, and application behavior at every state from creation to termination. Monitoring provides continuous visibility into how the container’s main process performs, enabling early detection of failures, misconfigurations, or security issues.
+
+This monitoring typically includes:
+
+Resource metrics: Such as CPU, memory, I/O, and network activity, to ensure containers operate within expected thresholds.  
+Health checks: Which probe the application at runtime to confirm it is responsive and functioning correctly.  
+Log collection: Where runtime logs are centralized to identify errors, latency, or unusual behavior.  
+Event monitoring: Which records lifecycle transitions, restarts, and failures for operational insight.  
+Security monitoring: Which detects vulnerabilities, unauthorized access attempts, and deviations from normal behavior.
+
+Creation and lifecycle management.
+
+To run a container creates and starts a container in one go. 
+Note the image of busybox should be present in the systme or it will download from public docker hub repository.
+Container is run in background for that we need to specify and "-d" option
+
+docker run busybox -d
+
+To only create an contianer and not run/start it.
+Used for preparing a container with specific network/volume configs to be started later by a script.
+
+docker create busybox
+
+To start an container which is stopped or created.
+
+docker start busybox
+
+To gracefully shutdown container using SIGTERM. 
+It is used to safely stopping an app to ensure database connections are closed correctly or any other function.
+
+docker stop busybox
+
+To stop and then starts a container.
+Applying quick configuration changes that require a process reload.
+
+docker restart busybox
+
+To freezes/thaws all processes using the freezer cgroup and relase.
+Temporarily reclaiming CPU for a high-priority task without losing the container's memory state.
+
+docker pause busybox
+
+docker unpause busybox
+
+
+To force-stop a container immediately use sending SIGKILL.
+Terminating a "zombie" process or an unresponsive application.
+
+docker kill busybox
+
+To blocks the terminal until a container stops, then prints its exit code.
+Automation scripts that need to know if a batch job finished successfully.
+
+docker wait busybox
+
+Operation and Debug
+
+To run an command inside th container we use shell/bash inside container to troubleshoot or check files.
+
+docker exec -it busybox
+
+To get the logs of the application that is running insdie the container. We get the STDOUT and STDERR, to troubleshoot if the alpplication crashed.
+
+docker logs --tail 100 busybox
+
+To connect the local IO to the containers main process. Get the realtime output of foreground process.
+
+docker attach busybox
+
+To copy the files between the host and the container, extract a configuration file or logs that wasn't mapped to a volume.
+
+Copy a file to a container
+docker cp config.txt busybox:/app/config.txt
+
+Copy a log file from contianer to local directory or path
+docker cp busybox:/var/log/app.log ./app.log
+
+Copy an entire directory
+
+docker cp ./website_files busybox:/var/www/html
+
+To check the changes made to containers filesystem since it started.
+View and have a security audits to see if a compromised app modified system binaries.
+
+docker diff busybox
+
+To change the name of the container.
+
+docker rename busybox freebox
+
+Monitoring and Information
+
+To list all the running contianers or an specific one and get its processes running on it.
+
+docker ps -a 
+
+docker ps busybox 
+
+To view and check the low level system information in json ouput format. Like getting status, environment,volume mounts and IP address 
+
+docker container inspect busybox
+
+To stream the resource usage (CPU, Network, Memory) to identify which container is causing the high load on the host.
+Check the single container also
+
+docker stats
+
+docker stats busybox
+
+To check the running process of a contianer checking the container has spawned unintended sub-process.
+
+docker top 
+
+To list the port mapping check which port is mapped to the contianer's internal port
+
+docker port
+
+To check the lifcycle/system level events of containers monitoring when contianers are created, started or died across the daemon. For all and individual container.
+
+docker events 
+
+docker events busybox
+
+Cleanup and Maintainance
+
+To remove the container that is stopped.
+
+docker rm busybox
+
+To export an filesystem into a tar file archive. Creating a snapshot of a specific container state for archival
+
+docker container export busybox > newbox.tar
+
+To create an new image of container from an running one.
+
+docker commit busybox newfreebox:v1
+
+To update the changes of resource like CPU/Memory 
+
+docker update --cpu-shares 512 -m 300M  busybox
+
+To delete all stoped containers routine maintainance to clear out exited containers
+
+docker prune 
