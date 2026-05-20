@@ -1,0 +1,162 @@
+DOCKER SETUP OF LOGGIN DAEMON/SERVICE LOGS, CONTAINER LOGS, EVENTS AND APPLICATION LOGS, EVENTS
+
+Docker logs we will see in three parts daemon docker and containerd logs itself.
+Docker logs we will see of containers and applications running inside the containers.
+
+Docker DAEMON/SERVICE logs
+
+When dockerd and containerd run as systemd services, their internal operations (e.g., pulling images, starting containers, network changes) are captured by the systemd journal. 
+
+How they are recorded: systemd intercepts everything the services write to their standard output.
+Where to find them: Use the journalctl utility to query the binary journal.
+Docker Engine: journalctl -u docker.service
+containerd: journalctl -u containerd.service
+Live View: Add -f to follow logs in real-time (e.g., journalctl -fu docker.service)
+
+
+Docker CONTAINER and APPLICATION logs
+
+Events describe what happened to the container, while Logs describe what is happening inside the container.
+
+When you run a container, Docker captures the application's STDOUT and STDERR streams. 
+
+How they are recorded: By default, Docker uses the json-file logging driver.
+Where they are stored: They are written to a JSON-formatted file on the host's physical storage, specific to each container:
+Path: /var/lib/docker/containers/<container-id>/<container-id>-json.log.
+How to view them: You should generally use the Docker CLI instead of navigating to the file manually:
+docker logs <container_name_or_id>
+
+Container and Application logs different?
+Usually Same: By default, Docker "listens" to whatever the application prints to the screen (STDOUT and STDERR). If your app says Hello World, Docker catches that and calls it a "container log."
+Sometimes Different: If your application is configured to write logs to a specific file inside the container (like /var/log/myapp.log) instead of printing to the screen, Docker will see nothing. 
+In this case, docker logs will be empty.
+
+Event Logs vs. Application Logs
+Application Logs: These are the messages your code generates (e.g., "User logged in," "Database error").
+Stored: In /var/lib/docker/containers/<id>/<id>-json.log (if no driver is set).
+View via: docker logs <container_id>.
+Event Logs: These are "system actions" (e.g., "Container started," "Container died," "Image pulled").
+Stored: These aren't stored in a text file; they are kept in the Docker host's memory or the systemd journal.
+View via: docker events.
+
+When no log driver is set
+If you don't touch any settings, Docker defaults to the json-file driver.
+Storage: Every single line your app prints is wrapped in a JSON object and saved to a file on your disk:
+/var/lib/docker/containers/<long-id>/<long-id>-json.log
+The Danger: As mentioned, this file will grow forever until your hard drive is 100% full.
+
+To check the container died event that has happened due to the host resource or some other crash we need to see the below
+
+docker inspect 3eff300389b8 | grep OOMK
+ 
+If the output is false then it is not due to the host resource or server/VM issue. Elese it is if the exitCode 137 or true is come up.
+
+We can also see there is any error 
+
+docker inspect c0d3addb3f63 | grep Error
+
+
+## When we set the logging on the container/application  we have to see and look out for three things
+
+Logging Driver for container and which are supported by docker
+Example : Syslog, Local, gcplogs, awslogs, Splunk, Fluentd etc.
+
+When ever we set the loggin driver on container we need to see what mode it is and how much block of chunk the logs is sent at a time.
+There are two modes direct/blocking mode and non-blocking mode.
+The primary advantage of choosing between blocking and non-blocking modes in Docker is the tradeoff between log reliability and application availability. 
+The direct mode sends the logs to the logging driver.
+The non-blocking mode uses an intermediate pre-container buffer which is memory and we have to se the size. This need to be taken care at a time default is size 1MB in most of the logging drivers.
+
+Blocking vs. Non-Blocking Modes
+Blocking (Default):
+Advantage: Guarantees that every log message reaches the driver.
+How it works: When the container writes to stdout or stderr, the process pauses (blocks) until the logging driver confirms the message is processed.
+Risk: If the logging destination (like a remote server) is slow or down, the entire application can freeze or crash due to "backpressure".
+Non-Blocking:
+Advantage: Prioritizes application performance and uptime. The application never waits for the logging system.
+How it works: Logs are written to an intermediate in-memory ring buffer and processed asynchronously by the driver.
+Risk: If the buffer fills up faster than the driver can clear it, older log messages are dropped to make room for new ones. 
+
+In non-blocking mode, there is no "pre-container" entity or specific file path used for the buffer; it is an in-memory structure managed by the Docker daemon. 
+Mechanism: It uses a ring buffer (circular buffer). This is a fixed-size portion of RAM dedicated to each container.
+Configurable Size: You control this with the max-buffer-size option (default is 1MB).
+Workings: The container application hands off the log to this buffer and immediately resumes execution. 
+The logging driver then pulls from this buffer to send data to the final destination (disk, network, or cloud).
+
+For mission-critical and production-grade applications, the standard recommendation is to use non-blocking mode, especially when using network-based drivers like awslogs, gcplogs, or a remote syslog.
+
+Preventing App Crashes: In blocking mode (the default), if your logging server or network goes down, your application will "freeze" because it cannot finish writing to its own output. This can lead to health check failures and total service downtime.
+The Trade-off: Non-blocking mode uses an in-memory buffer. If the buffer fills up, it will drop logs rather than stopping your app. For most businesses, losing a few logs is a better failure than losing the entire application.
+Exception: If you have a strict compliance requirement where every single log must be captured (e.g., banking transactions), you should use blocking mode and accept the risk of application pauses during network issues like PCI-DSS and Fintech.
+
+
+The lastly the environment that can be specified using environment variables and output format of the log.
+
+This can be achieved by below command with tag as the output format handler.
+
+docker run --log-driver syslog --log-opt syslog-address=tcp://192.168.1.10:514 --log-opt mode=non-blocking --log-opt max-buffer-size=4m --log-opt tag="{{.ImageName}}/{{.Name}}/{{.ID}}" --label production_status=testing -e os=ubuntu
+
+
+Example out format will look like by the use of tag as below
+Image use for running container ImageName - hello-world,  Container name Name - foobar, Container ID only first 12 character ID - 5790672ab6a0
+
+Aug  7 18:33:19 HOSTNAME hello-world/foobar/5790672ab6a0[9103]: Hello from Docker.
+
+For configuring the globally for all containers running logging driver, format and mode we can use an file configuration.
+The file is of docker daemon found in /etc/docker/daemon.json in json format.
+
+Add this in .json file 
+For R - Syslog
+
+{
+  "log-driver": "syslog",
+  "log-opts": {
+    "syslog-address": "tcp://192.168.1.10:514",
+    "mode": "non-blocking",
+    "max-buffer-size": "25m"
+  }
+}
+
+
+Add this in .json file
+For GCP gcplogs
+
+{
+  "log-driver": "gcplogs",
+  "log-opts": {
+    "gcp-project": "my-project-id",
+    "mode": "non-blocking",
+    "max-buffer-size": "25m"
+  }
+}
+
+Add this in .json file
+For local
+
+{
+  "log-driver": "local",
+  "log-opts": {
+    "max-size": "100m",
+    "max-file": "5",
+    "mode": "non-blocking",
+    "max-buffer-size": "4m"
+  }
+}
+
+
+
+Add this in .json file
+For Aws Logs
+
+{
+  "log-driver": "awslogs",
+  "log-opts": {
+    "awslogs-region": "us-east-1",
+    "awslogs-group": "production-app-logs",
+    "mode": "non-blocking",
+    "max-buffer-size": "25m"
+  }
+}
+
+
+
