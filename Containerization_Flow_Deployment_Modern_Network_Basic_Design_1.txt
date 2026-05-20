@@ -1,0 +1,489 @@
+CONTAINERISATION BASED MODER NETWROK SYSTEM FLOW AND DESIGN BASIC
+
+Production Recommendation : 
+
+Layer 7 Reverse Proxy / Load Balancer 
+For a modern enterprise HTTPS application, a Layer 7 (L7) Reverse Proxy / Load Balancer (e.g., AWS ALB, NGINX Plus, HAProxy, F5 BIG-IP) is the industry gold standard. 
+
+Why the Other Options Fall Short for HTTPSStandard DNAT : Operates at Layer 3/4. It cannot inspect SSL traffic, balance loads based on URL paths, inject security headers, or protect against web-application vulnerabilities.
+
+Direct Server Return (DSR) : Optimized only for high-bandwidth outbound streaming (e.g., video delivery). Because the return traffic bypasses the load balancer, it prevents you from using central cookie-based session persistence, web application firewalls (WAF), or centralized SSL termination.
+
+Production-Ready Architecture BlueprintThis design isolates your backend servers from the internet while providing high availability, SSL offloading, and advanced security.       
+
+		[ Internet Clients ]
+                │  (Public Traffic: HTTPS/443)
+                ▼
+  ┌───────────────────────────┐
+  │     Anycast Public VIP    │
+  └─────────────┬─────────────┘
+                ▼
+┌───────────────────────────────┐
+│ Layer 7 Load Balancer / Proxy │ ◄── [ SSL/TLS Certificate Terminated Here ]
+└───────────────┬───────────────┘
+                │  (Internal Traffic: HTTP/80 or HTTPS/443)
+                │  (Appends X-Forwarded-For Header)
+                ▼
+   ┌─────────────────────────┐
+   │ Private Subnet Security │ (Blocks all internet traffic except from LB)
+   └────────────┬────────────┘
+                ├──────────────────────────────┐
+                ▼                              ▼
+  ┌──────────────────────────┐   ┌──────────────────────────┐
+  │    Backend Server 01     │   │    Backend Server 02     │
+  │ IP: 10.0.1.10 (Private)  │   │ IP: 10.0.1.11 (Private)  │
+  └──────────────────────────┘   └──────────────────────────┘
+  
+
+
+Step-by-Step Enterprise Implementation Guide :
+
+Network & IP Allocation
+
+External Layer : Assign your public IP (VIP) exclusively to the external interface of your L7 Load Balancer.
+
+Internal Layer : Place your backend HTTPS servers in a private VPC subnet. Give them private IPs only (e.g., 10.0.1.10, 10.0.1.11).
+
+Routing : The backend servers use a private NAT Gateway to fetch outbound internet patches, ensuring they never expose an inbound public IP slot.
+
+Traffic Flow & Protocol Management
+
+Client-to-Proxy : The client establishes a TLS handshake with the public VIP. The L7 Load Balancer decrypts the traffic using an SSL certificate managed via a secure store (e.g., AWS Certificate Manager, Let's Encrypt).
+
+Header Injection : The proxy injects the client's actual public IP into the HTTP header before forwarding the request:
+
+http 
+
+X-Forwarded-For: [Client_Public_IP]
+X-Forwarded-Proto: https
+
+
+Proxy-to-Backend : The proxy forwards the decrypted traffic over the clean internal network to the backend server's private IP.
+Note: For strict compliance (e.g., PCI-DSS), re-encrypt this internal link using a lightweight, self-signed internal certificate.
+
+Production Security Configuration (Crucial)
+
+Firewall / Security Groups : Configure the network adapter firewalls on Backend Server 01 and 02 to only accept inbound traffic originating from the private IP addresses of the L7 Load Balancer. Block all other inbound sources completely.
+
+Health Checks : Configure the L7 Load Balancer to poll a specific application health endpoint (e.g., GET /healthz) every 5 seconds. If a backend server returns anything other than an HTTP 200 OK, the proxy instantly cuts traffic to that node without dropping client sessions.
+
+
+Production Architecture with WAF Integration
+
+To implement a Web Application Firewall (WAF) in an enterprise environment, you place the WAF directly inline with your Layer 7 Load Balancer. This ensures all incoming HTTPS traffic is inspected, scrubbed, and filtered before it ever reaches your backend network adapters.
+
+Production Architecture        
+
+
+		[ Internet Clients ]
+                  │  (HTTPS / Port 443)
+                  ▼
+    ┌───────────────────────────┐
+    │     Anycast Public VIP    │
+    └─────────────┬─────────────┘
+                  ▼
+  ┌───────────────────────────────┐
+  │  Web Application Firewall     │ ◄── [ Inspects payloads for OWASP Top 10 ]
+  │            (WAF)              │ ◄── [ Decrypts TLS or inspects post-decryption ]
+  └───────────────┬───────────────┘
+                  ▼
+  ┌───────────────────────────────┐
+  │ Layer 7 Load Balancer / Proxy │ ◄── [ Handles routing, cookies & health checks ]
+  └───────────────┬───────────────┘
+                  │  (Forwarded Private Traffic)
+                  ▼
+     ┌─────────────────────────┐
+     │  Backend Private Subnet │
+     └────────────┬────────────┘
+                  ├──────────────────────────────┐
+                  ▼                              ▼
+    ┌──────────────────────────┐   ┌──────────────────────────┐
+    │    Backend Server 01     │   │    Backend Server 02     │
+    │   (Private IP Only)      │   │   (Private IP Only)      │
+    └──────────────────────────┘   └──────────────────────────┘
+	
+	
+Deployment Models for a WAF
+
+We can deploy your WAF in one of two enterprise models depending on your infrastructure:
+
+Cloud-Native / Edge WAF (Highly Recommended): 
+The WAF sits at the DNS/network edge. Traffic is inspected before it even hits your primary cloud infrastructure.
+Examples : Cloudflare WAF, AWS WAF (attached to an Application Load Balancer), Azure WAF (attached to Application Gateway).
+How it works : You attach the WAF directly to your public VIP/Load Balancer via a cloud console policy. It handles massive Distributed Denial of Service (DDoS) attacks at the edge, saving your backend servers from resource exhaustion.
+
+Software-Defined / Instance WAF
+
+The WAF runs as a module inside your self-hosted Layer 7 Reverse Proxy.
+Examples : ModSecurity module running inside NGINX Plus or HAProxy.
+
+How it works : The open-source or commercial WAF engine compiles directly into your proxy software. It inspects the HTTP request in real-time as the proxy processes the packet.
+
+
+Core WAF Protections to Enable : 
+
+Once deployed, your WAF must be configured to enforce specific security rulesets at Layer 7. 
+
+OWASP Top 10 Mitigation : Instantly block SQL Injection (SQLi), Cross-Site Scripting (XSS), and Remote File Inclusion (RFI) payloads.
+
+Geo-Blocking & IP Reputation : Restrict or challenge traffic coming from specific countries or known malicious IP botnets.
+
+Rate Limiting : Protect your HTTPS endpoints (like /api/login or /checkout) by limiting requests per IP address (e.g., maximum 20 requests per minute per IP).
+
+Virtual Patching : Block traffic exploiting newly discovered zero-day vulnerabilities before your developers have time to patch the backend server code.
+
+
+On-Premises Production Architecture : 
+
+F5 BIG-IP + NGINX Plus : 
+
+In a secure, high-performance on-premises enterprise environment, the best practice is a two-tier architecture.
+
+Tier 1 (Network Edge & Security) : F5 BIG-IP acts as the external-facing Layer 4/7 ADC, handles the Public VIP, hosts the Web Application Firewall (F5 Advanced WAF / ASM), and terminates the public SSL/TLS certificates.
+
+Tier 2 (Application Routing & Mesh) : NGINX Plus acts as the internal application load balancer, ingress controller, or reverse proxy, sitting directly in front of the private backend server network adapters.
+
+On-Premises Architecture Diagram  :               
+
+				[ Internet / Corporate Core Clients ]
+                                  │
+                                  ▼ (HTTPS / Public VIP: 198.51.100.5)
+┌───────────────────────────────────────────────────────────────────────┐
+│                          F5 BIG-IP ADC & WAF                          │
+│  1. Terminates Public SSL/TLS  |  2. F5 Advanced WAF Payload Inspection│
+└─────────────────────────────────┬─────────────────────────────────────┘
+                                  │
+                                  ▼ (Internal Subnet: 10.10.10.0/24)
+┌───────────────────────────────────────────────────────────────────────┐
+│                        NGINX Plus Cluster                             │
+│  1. Receives clean HTTP/HTTPS  |  2. Handles advanced path routing    │
+└─────────────────────────────────┬─────────────────────────────────────┘
+                                  │
+                                  ▼ (Private Server Subnet: 10.20.20.0/24)
+            ├─────────────────────┴─────────────────────┐
+            ▼ (Private IP: 10.20.20.11)                 ▼ (Private IP: 10.20.20.12)
+┌──────────────────────────────────────┐    ┌──────────────────────────────────────┐
+│          Backend App Server 01       │    │          Backend App Server 02       │
+└──────────────────────────────────────┘    └──────────────────────────────────────┘
+
+Real Production Configurations : 
+
+Using F5 BIG-IP Configuration (TMSH Console)Configure the F5 to hold the Public VIP, attach the WAF policy, terminate SSL, and pass traffic to the NGINX cluster.
+
+Configuration Files sitting :
+
+1. Create the Pool pointing to the internal NGINX Plus instances
+
+modify ltm pool nginx_plus_pool members add { 10.10.10.11:443 10.10.10.12:443 } monitors add { https }
+
+2. Create the Client SSL Profile to terminate public traffic
+
+create ltm profile client-ssl production_ssl_profile cert production_corp.crt key production_corp.key
+
+3. Create the HTTP Profile to insert the original client IP header
+
+create ltm profile http enterprise_http_profile insert-xforwarded-for enabled
+
+4. Create the Public Virtual Server (VIP) binding WAF and NGINX Pool
+
+create ltm virtual production_https_vip {
+    destination 198.51.100.5:443
+    ip-protocol tcp
+    pool nginx_plus_pool
+    profiles add { enterprise_http_profile client-ssl production_ssl_profile tcp }
+    policies add { security_waf_production_policy }
+}
+
+OR -
+
+Using NGINX Plus Configuration (nginx.conf) : Configure NGINX to accept traffic from the F5, trust the X-Forwarded-For header injected by the F5, and route traffic to the backend application servers.
+
+
+Configuration file setting nginx# 
+
+Define the backend application pool
+upstream backend_app_servers {
+    zone backend_servers_zone 64k;
+    server 10.20.20.11:8080 max_fails=3 fail_timeout=10s;
+    server 10.20.20.12:8080 max_fails=3 fail_timeout=10s;
+}
+
+server {
+    listen 443 ssl;
+    server_name app.enterprise.corp;
+
+    # Internal SSL certificates for F5-to-NGINX traffic encryption
+    ssl_certificate /etc/nginx/ssl/internal_nginx.crt;
+    ssl_certificate_key /etc/nginx/ssl/internal_nginx.key;
+
+    # Tell NGINX to extract the client IP from the F5's HTTP header
+    set_real_ip_from 10.10.10.0/24; # Trust the F5 subnet
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+
+    location / {
+        proxy_pass http://backend_app_servers;
+        
+        # Standard production reverse-proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeouts preventing backend hanging connections
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 60s;
+    }
+
+    # Enable active health checking (NGINX Plus feature)
+    location @health_check {
+        proxy_pass http://backend_app_servers;
+        health_check interval=5s fails=3 passes=2 uri=/healthz;
+    }
+}
+
+
+Key Operational Benefits of this Setup : 
+
+Hardware-Accelerated Cryptography : The F5 processes massive SSL/TLS overhead using dedicated onboard ASIC chips, freeing up your NGINX and application server compute resources.
+
+Centralized Security Logging : The F5 Advanced WAF processes security violations (like OWASP attacks) at the perimeter and streams logs directly to your on-premise SIEM (e.g., Splunk, QRadar).
+
+Dynamic Upstream Scaling : NGINX Plus allows you to add or remove physical backend adapters/servers on-the-fly via an API without reloading the software or dropping client connections.
+
+
+
+1. F5 BIG-IP Active/Standby HA Sync-Failover Setup :
+
+To ensure high availability on-premises, your two F5 appliances must be joined into a Device Service Clustering (DSC) group. They share a single floating IP address (the Public VIP) that instantly fails over if the active unit drops.
+
+Step-by-Step Sync-Failover Implementation (TMSH) : Run these commands on both F5 appliances to establish the secure control plane over their dedicated high-availability (HA) network adapters (e.g., interface 1.2 connected via a crossover cable or private HA VLAN):
+
+F5 BIG-IP configuration file settings
+
+# 1. Define the local HA properties (Run on Device A and Device B respectively)
+
+# Replace 192.168.100.1 with Device A's IP, and 192.168.100.2 with Device B's IP
+
+modify cm device local-device { configsync-ip 192.168.100.1 unicast-addresses { { ip 192.168.100.1 } } mirror-ip 192.168.100.1 }
+
+# 2. Add the remote peer to the trust domain (Run on Device A only)
+
+modify cm trust-domain /Common/Root add-devices { devices { 192.168.100.2 { username admin password SecretPassword } } }
+
+# 3. Create the Failover Sync Group (Run on Device A)
+
+create cm device-group enterprise_ha_group { devices { f5-node-a.corp f5-node-b.corp } type sync-failover auto-sync enabled }
+
+# 4. Bind the Floating Traffic Group to your VLANs (Allows the VIP to float)
+
+modify cm traffic-group traffic-group-1 ha-order { f5-node-a.corp f5-node-b.corp }
+
+
+When you create your Public VIP (198.51.100.5) on the active unit, it will automatically register under traffic-group-1. If Node A loses power or its backend links fail, Node B takes ownership of the VIP ARP requests in under a second.
+
+
+
+2. NGINX Plus Layer 7 Content-Based Routing Configuration : 
+
+Once the clean, decrypted traffic passes the F5 WAF, NGINX Plus acts as an intelligent traffic cop. It reads the HTTP Request URI path and dispatches the traffic to isolated, purpose-built backend server pools.
+
+Update your /etc/nginx/nginx.conf file to declare separate upstream groups and context routes :
+
+NGINX Plus configuration file setting
+nginx
+
+# Pool 1: Dedicated stateless application servers for processing API calls
+upstream api_backend_pool {
+    zone api_backend_zone 128k;
+    server 10.20.20.21:8080 max_fails=3 fail_timeout=5s;
+    server 10.20.20.22:8080 max_fails=3 fail_timeout=5s;
+}
+
+# Pool 2: High-performance servers optimized for serving static imagery and assets
+upstream static_backend_pool {
+    zone static_backend_zone 128k;
+    server 10.20.30.51:80 max_fails=2 fail_timeout=10s;
+    server 10.20.30.52:80 max_fails=2 fail_timeout=10s;
+}
+
+# Pool 3: Default web frontend app pool
+upstream default_web_pool {
+    zone default_web_zone 128k;
+    server 10.20.10.11:8080 max_fails=3 fail_timeout=10s;
+    server 10.20.10.12:8080 max_fails=3 fail_timeout=10s;
+}
+
+server {
+    listen 443 ssl;
+    server_name app.enterprise.corp;
+
+    ssl_certificate /etc/nginx/ssl/internal_nginx.crt;
+    ssl_certificate_key /etc/nginx/ssl/internal_nginx.key;
+
+    # Trust the F5 HA Floating IP / Subnet
+    set_real_ip_from 10.10.10.0/24;
+    real_ip_header X-Forwarded-For;
+
+    # ROUTING RULE 1: Direct all API calls to the API cluster
+    
+	location /api/ {
+        proxy_pass http://api_backend_pool;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        
+        # Performance tuning for high-throughput API endpoints
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_next_upstream error timeout http_502 http_503;
+    }
+
+    # ROUTING RULE 2: Cache and route static files directly to storage/static nodes
+    
+	location /static/ {
+        proxy_pass http://static_backend_pool;
+        proxy_set_header Host $host;
+        
+        # Optimize asset delivery
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+
+    # ROUTING RULE 3: Catch-all fallback route for standard browser users
+    
+	location / {
+        proxy_pass http://default_web_pool;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        
+        # Active Health Check target for the main application
+        health_check interval=5s fails=3 passes=2 uri=/healthz;
+    }
+}
+
+Verification and Traffic Validation : 
+
+F5 Failover Test : Run tmsh reboot on the active F5. Run a continuous ping or curl against your public VIP; you should notice a maximum of 1 dropped packet as the traffic group floats to Node B.
+
+NGINX Routing Verification : Use curl -I https://enterprise.corp to verify that NGINX successfully processes the Layer 7 rule and forwards it directly to the designated api_backend_pool nodes.
+
+
+
+1. NGINX Plus Session Persistence (Sticky Cookies) : 
+To keep a user bound to the same backend application server throughout their session, use the NGINX Plus native sticky cookie directive. 
+NGINX inserts a secure session cookie into the first downstream HTTP response, tracking which backend node handled the initial request.Update your nginx.conf file inside the upstream blocks:
+
+Cinfiguration file setting nginx
+
+nginxupstream default_web_pool {
+    zone default_web_zone 128k;
+    server 10.20.10.11:8080 max_fails=3 fail_timeout=10s;
+    server 10.20.10.12:8080 max_fails=3 fail_timeout=10s;
+
+    # Inject a secure, browser-managed sticky cookie
+    sticky cookie route_id expires=1h domain=.enterprise.corp path=/ secure httponly samesite=strict;
+}
+
+
+How it works in production : 
+
+Initial Request : NGINX picks a server using standard round-robin (e.g., 10.20.10.11).
+
+Response : NGINX returns the app data along with a Set-Cookie: route_id=[hashed_server_id]; Path=/; Secure; HttpOnly; SameSite=Strict header.
+
+Subsequent Requests : The client browser automatically includes this cookie. NGINX reads route_id and bypasses its load-balancing algorithm to route the user back to 10.20.10.11.
+
+Node Outage : If that server fails a health check, NGINX transparently shifts the user to an active node and updates the cookie.
+
+
+2. Mutual TLS (mTLS) Zero-Trust EnforcementTo prevent internal network snooping, establish mTLS between your F5 appliances and NGINX Plus. The F5 must present a client certificate to NGINX, and NGINX must present a server certificate to the F5.
+
+Step A: Configure NGINX to Validate the F5 Client CertificateAdd these parameters to the server block in /etc/nginx/nginx.conf:
+
+Cinfiguration file setting nginx
+
+server {
+    listen 443 ssl;
+    server_name app.enterprise.corp;
+	
+    # Enforce TLS 1.3 exclusively
+    ssl_protocols TLSv1.3;
+    
+    # Secure, non-weak cipher suites
+    ssl_ciphers TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256;
+    ssl_prefer_server_ciphers off; 
+	
+    # HSTS Header Injection (forces HTTPS for 1 year)
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+
+    # NGINX Server Identity Certificates
+    ssl_certificate /etc/nginx/ssl/internal_nginx.crt;
+    ssl_certificate_key /etc/nginx/ssl/internal_nginx.key;
+
+    # DH Parameter hardening (Required for clean TLS handshakes)
+    ssl_dhparam /etc/nginx/ssl/dhparam.pem;
+
+    # mTLS Configuration: Validate the incoming F5 Appliance Client Certificate
+    ssl_client_certificate /etc/nginx/ssl/internal_f5_ca.crt; 
+    ssl_verify_client on;                                      
+    ssl_verify_depth 2;
+
+    # FIXED: mTLS check moved to server level block to avoid breaking proxy_pass inside location
+    if ($ssl_client_verify != "SUCCESS") {
+        return 403;
+    }
+
+    location / {
+        proxy_pass http://default_web_pool;
+        
+        # Standard reverse-proxy headers (Ensures app sees original traffic details)
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Keepalive optimization for F5-to-NGINX links
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+}
+
+To test run nginx -t on your instance to verify the syntax compiles perfectly.
+
+Step B: Configure the F5 BIG-IP Server SSL Profile (TMSH)The F5 must be told to trust NGINX’s internal certificate and actively pass its own client certificate down the chain. Run these commands on your active F5 appliance:
+
+text
+
+# 1. Create the Server SSL profile linking F5 client credentials and trusting NGINX CA
+
+create ltm profile server-ssl enterprise_mtls_server_profile {
+    cert internal_f5_client.crt
+    key internal_f5_client.key
+    ca-file internal_nginx_ca.crt
+    peer-cert-mode require
+}
+
+# 2. Attach the Server SSL Profile to your Virtual Server (VIP)
+
+modify ltm virtual production_https_vip profiles add { enterprise_mtls_server_profile }
+
+
+Production Verification Checklist
+
+Verify Stickiness : 
+
+Execute a curl call retaining cookie outputs :  
+
+curl -i -k https://enterprise.corp
+
+
+Confirm you see the Set-Cookie: route_id= parameter inside the returned HTTP headers.
+
+
+Verify Zero-Trust Access: Attempt to access the internal NGINX cluster directly using a machine other than the F5 appliances:
+
+curl -k https://10.10.10
+
+The connection must be forcefully rejected with an HTTP/1.1 403 Forbidden response because the device failed to present the verified F5 client certificate.
+
+
