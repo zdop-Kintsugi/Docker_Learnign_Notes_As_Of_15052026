@@ -1,0 +1,214 @@
+DOCKER SETUP AND IT'S PRE-REQUISITES 
+
+Install debian minimal linux on vmware workstation/ oracle vbox use minimum 2 GB RAM and 50 GB Storage and 2 vCPU.
+
+Add an temporary sudo capable user or user root have added an sudo user.
+
+adduser tempConadmin
+
+usermod -aG sudo tempConadmin
+
+
+Install sudo package if not getting sudo command in use
+
+apt update && apt install sudo
+
+
+Switch to the Sudoers user account tempConadmin from here on use sudo before running root privilege commands.
+
+su - tempConadmin 
+
+Now run this command to get the docker installation OS info 
+
+sudo echo $(. /etc/os-release && echo "$VERSION_CODENAME")
+
+We are going to check in the OS is there aready installed or present the Docker in the system and any versions of it.
+
+sudo apt remove $(dpkg --get-selections docker.io docker-compose docker-doc podman-docker containerd runc | cut -f1)
+
+Once it is confirmed " no package found " we can go ahead and start installing the docker in it using the ATP repository. 
+Adding the repository source of docker for the apt repository list.
+### This may change as of version and OS type
+
+# Add Docker's official GPG key:
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add the repository to Apt sources:
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update
+
+
+Installing the latest version of docker we want however we can install the version we need check documentation.
+
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
+
+Once this is complete check the daemon service of docker using the below commnads and start it.
+Mostly the services will be started and enabled in Ubuntu or similar flaveours of Linux distor.
+
+sudo systemctl status docker 
+
+sudo systemctl status containerd.service
+
+sudo systemctl start docker 
+
+sudo systemctl start containerd.service
+
+If we want that the docker and containerd service to be started if any reboot or any kind of patching activity stops it make sure to create and add the service file or use the below command.
+Mostly the file is created in the path /usr/lib/systemd/system/docker.service and /usr/lib/systemd/system/containerd.service .
+
+But incase you can copy it in the path /etc/systemd/system/multi-user.target.wants/docker.service and  with the same name as docker.service containerd.service for each.
+
+Also we can do the below check and create and link file of the same in the path using below commands
+
+sudo systemctl is-enabled docker.service 
+
+sudo systemctl is-enabled containerd.service
+
+If not enabled if already enabled no need to run the below command
+
+sudo system enable docker.service 
+
+sudo systemctl enable containerd.service
+
+Check the Docker version of client and server
+
+docker version 
+
+After the post-installation steps for Docker Engine. We need to add users and group to handle service of docker.
+
+The Docker daemon binds to a Unix socket, not a TCP port. 
+By default it's the root user that owns the Unix socket, and other users can only access it using sudo. 
+The Docker daemon always runs as the root user.
+
+If you don't want to preface the docker command with sudo, create a Unix group called docker and add users to it. 
+When the Docker daemon starts, it creates a Unix socket accessible by members of the docker group.
+
+sudo groupadd docker
+
+Once the group is created check it 
+
+sudo getent group docker
+
+sudo getent shadow $USER 
+
+Now above command will give us the info on current user that is logged in.
+
+Add the curret user to docker group
+
+sudo usermod -aG docker $USER
+
+To make the changes to the group first run below command then logout and then run command  
+
+sudo newgrp docker
+
+id -nG
+
+## If not work restart VM.
+
+
+Now RUN and docker image then check up for the same is come up to test the docker is setup.
+Note here we do not need registry login to the docker. As we are running the publically available images.
+
+docker run hello-world
+
+docker ps -a
+
+First it will download image and will take some time for the same and then it will run the image as container.
+
+Check the image is present in the local system that has been pulled from the docker hub.
+
+docker images -a 
+
+By default, the Docker daemon (the engine) runs as the root user, meaning only root can talk to it. 
+The docker group allows specific non-root users to communicate with the engine without using sudo every time.
+
+In Linux, Docker communicates through a Unix domain socket located at /var/run/docker.sock. Think of this socket as the "door" to the Docker Engine.
+Ownership: When the Docker service starts, it sets the ownership of that socket file to root:docker.
+Permissions: It grants read and write permissions to the owner (root) and the group (docker).
+The Link: When you add a user to the docker group, that user inherits the right to "write" to that socket. 
+When you type docker run, your command travels through that socket to the daemon, which then executes the request as root.
+
+The docker group primarily grants rights to the daemon API, not necessarily all the files on your hard drive. However, it does grant access to:
+/var/run/docker.sock: As mentioned, this is the most critical file.
+/var/lib/docker: This is where images and containers live. While usually restricted to root, the daemon handles the file manipulation here on behalf of any user in the docker group.
+
+When we run docker ps.
+Identity Check: The system checks if your user ID is part of the docker group in /etc/group.
+Socket Access: Because you are in the group, you are allowed to send the "ps" request to /var/run/docker.sock.
+Daemon Action: The Docker Daemon (running as root) receives the request, gathers the info, and sends it back to you.
+
+
+TCP sockets are for talking over a network (even if it's just to your own machine), while Unix sockets are for high-speed communication between processes on the same local machine.
+TCP Sockets (Network-Based)
+These use the IP stack and are identified by an IP address and Port number (e.g., 127.0.0.1:80).
+Scope: Can communicate between different computers or locally (via localhost).
+Overhead: Higher. The data has to go through the full network stack (routing, checksums, headers, etc.), even if it's staying on the same machine.
+Reliability: Very high across networks, but slightly slower for local-only tasks.
+Unix Sockets (File-Based)
+These are identified by a file path on the disk (e.g., /var/run/mysql/mysql.sock).
+Scope: Local only. They cannot communicate with other machines.
+Overhead: Very low. Since the data never leaves the kernel, it skips the network headers, routing, and checksums. This makes them roughly 30% faster than TCP for local traffic.
+Security: Better for local use. You can use standard Linux file permissions (read/write) to control which users can access the socket.
+
+Note the docker and containerd service is running on Unix socket so we cannot check its service using the below.
+
+
+Docker Socket (/var/run/docker.sock) 
+This is the entry point for you, the user. 
+Purpose: It is the API "front desk." When you type docker run or docker ps, the Docker CLI sends that command through this socket file.
+Who listens? The Docker Daemon (dockerd).
+Permissions: As we discussed, this file is owned by root:docker. Access to this socket is what gives you the power to manage containers. 
+Containerd Socket (/run/containerd/containerd.sock) 
+This is the internal line used by the system itself. 
+Purpose: Docker doesn't actually "run" containers anymore; it hands that job off to containerd (a lower-level manager). The Docker Daemon acts as the boss, and it sends instructions to containerd through this second socket.
+Who listens? The containerd service.
+Flow: Your Command → docker.sock → Docker Daemon → containerd.sock → Containerd → Starts Container. 
+Why use Sockets instead of Network Ports (TCP)?
+Security: A Unix socket is a file. You can use standard Linux permissions (chmod/chown) to control exactly who can touch it. A network port is much harder to "lock down" from other users on the same machine.
+Speed: Because it doesn't have to wrap data in network headers (like TCP/IP), communication is slightly faster and uses less CPU.
+Local Only: By default, a socket cannot be accessed from outside the server, making it "secure by default." 
+
+ps -ef | grep docker 
+
+ps -ef | grep containerd 
+
+Also we get the PID in this result but prefer to use systemd based status to get the main PID
+
+Once we have the PID we can use the below command
+
+For Docker PID
+sudo ss -xplanou | grep 18852
+
+For Containerd PID
+sudo ss -xplanou | grep 18735
+
+Or we can do it directly
+
+sudo ss -xplanou | grep docker
+
+sudo ss -xplanou | grep containerd
+
+But not the standard like the TCP once as below with SSH PID or other network protocol PID 
+
+sudo ss -tplanou | grep ssh 
+
+or sudo ss -tplanou | grep 859   
+
+sudo ss -tplanou | grep :22
+
+
+That is the reason we do not need the firewall configuration for network ports when installing the docker.
+
+Until we use the container which need the port and network access that to is handled by docker with IPTables and Namespaces.
