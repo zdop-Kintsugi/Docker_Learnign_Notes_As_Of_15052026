@@ -1,0 +1,26 @@
+DOCKER REGISTRY DOCKER HUB SETUP FOR USER
+
+This is where registries come in when we want images or wnat to build and store/share it. 
+While there are many registries, Docker Hub is the default and go-to registry for images. 
+Docker Hub provides both a place for you to store your own images and to find images from others to either run or use as the bases for your own images.
+
+Explore the full catalog of trusted content on Docker Hub:
+
+Docker Official Images – Curated images for popular software
+Docker Hardened Images – Security-hardened, minimal production images (also available at dhi.io)
+Docker Verified Publishers – Images from verified software vendors
+Docker Sponsored Open Source – Images from sponsored OSS projects
+
+
+Docker Hub is the go-to registry for finding trusted content. 
+Docker provides a collection of trusted content, composed of Docker Official Images, Docker Verified Publishers, and Docker Sponsored Open Source Software, to use directly or as bases for your own images.
+
+Docker Hub provides a marketplace to distribute your own applications. 
+Anyone can create an account and distribute images. While you are publicly distributing the image you created, private repositories can ensure your images are accessible to only authorized users.
+
+
+By default we can download images the are publicly available without registration on docker hub.
+
+We can check the images that have been downloaded on the system 
+
+docker images -a 
