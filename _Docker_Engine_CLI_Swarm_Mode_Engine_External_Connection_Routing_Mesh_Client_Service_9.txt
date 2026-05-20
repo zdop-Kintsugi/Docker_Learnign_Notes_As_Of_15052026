@@ -1,0 +1,225 @@
+DOCKER SWARM MODE ROUTING MESH FOR EXTERNAL SERVICE ACCESS FOR CLIENTS
+
+Swarm mode’s routing mesh allows any node in the swarm to accept connections on published ports for any service, regardless of where the service’s containers are running.
+Swarm mode allows Docker nodes to act as a cluster. The mesh routes incoming requests to available containers across the swarm. The routing mesh ensures that any node can accept traffic on a published port, even if the container isn’t running there. Traffic is automatically routed to an active container.
+
+In a microservices architecture, you can deploy services across multiple nodes. For example, a payment service running on only 2 nodes can still be accessed via port 443 from any node in the swarm. This simplifies load balancing and high availability.
+In a production environment, you might have a web service running as a swarm service. With the routing mesh, users can connect to any node’s published port (e.g., port 80), and the request will be routed to an available container, even if it’s running on a different node. This simplifies load balancing and high availability, as you can place a load balancer in front of any or all nodes, and the mesh will handle routing.
+
+To use the ingress network in the swarm, you need to have the following ports open between the swarm nodes before you enable Swarm mode:
+
+Port 7946 TCP/UDP for container network discovery.
+Port 4789 UDP (configurable) for the container ingress network.
+
+We can also bypass the routing mesh for a given service. Using the DNSRR mechanism instead of ingress routing mesh of cluster with Virtual IP address.
+
+To publish a port when creating a service
+
+docker service create --name my-web --publish published=<Docker Host Port on All Nodes>,target=<Container Service Listening Port> nginx
+
+
+docker service create --name my-web --publish published=8080,target=80 nginx
+
+Here, port 8080 on any node routes to port 80 inside the container.
+
+Deploying an nginx reverse proxy in front of multiple backend services. Even if nginx runs only on 2 nodes, requests to port 8080 on any node are routed correctly.
+
+
+TCP/UDP Port Publishing :
+
+By default, ports are published as TCP. You can explicitly publish UDP or both.  If we omit the protocol specifier, the port is published as a TCP port.
+
+TCP only: -p 53:53
+
+UDP only: -p 53:53/udp
+
+Both: -p 53:53 -p 53:53/udp
+
+Only publishing the TCP port 
+
+docker service create --name dns-cache \
+  --publish published=53,target=53 \
+  dns-cache
+  
+ or
+ 
+docker service create --name dns-cache \
+  --publish published=53,target=53 ,protocol=tcp\
+  dns-cache
+
+TCP and UDP both port publishing at one go.
+
+docker service create --name dns-cache \
+  --publish published=53,target=53 \
+  --publish published=53,target=53,protocol=udp \
+  dns-cache
+  
+Only publishing the UDP port 
+
+docker service create --name dns-cache \
+  --publish published=53,target=53,protocol=udp \
+  dns-cache
+
+We can have use of external client/user traffic coming to docker swarm mode in following modes.
+
+Basic Internal Docker Cluster Routing Mesh.
+
+Docker Cluster Routing Mesh + External Load Balancer - Workload supported Web Apps, API endpoints, stateless services
+
+External Load Balancer + Host Mode - Workload supported DNS, Databases srevices, stateful services, latency-sensitive apps
+
+External Load Balancer + DNSRR - Workload supported DNS, Databases srevices, Real Time Games, VOIP, stateful services
+
+We cannot use DNSRR and routing mesh together because:
+
+Routing mesh requires a VIP to forward traffic.
+
+DNSRR explicitly disables the VIP and expects external systems (like a load balancer) to handle traffic distribution.
+
+It’s not possible to combine DNSRR with routing mesh — they are different endpoint modes.
+
+In Docker microservices, you choose one:
+
+External Load Balancer + Routing Mesh → mainstream, stateless services.
+
+External Load Balancer + DNSRR (no mesh) → specialized, performance-critical services.
+
+External Load Balancer + Host Mode is a related option: traffic goes directly to node-local containers, bypassing the mesh, but still requires Load Balancer awareness of which nodes run the service.
+
+  
+Bypassing the Routing Mesh : 
+
+Normally, Docker Swarm’s routing mesh acts like a built-in load balancer: any node can accept traffic on a published port, and requests are forwarded to whichever node is running the container.
+Bypassing the mesh means you don’t want this “any-node” behavior. Instead, traffic should go directly to the node/container that owns the port. This is useful when you need predictable networking or avoid the overhead of mesh routing.
+
+Host Mode : 
+Running stateful services like databases or DNS servers where traffic must always hit the local container. This avoids unnecessary routing and ensures predictable performance.
+
+In host mode, the published port is bound directly to the node’s network stack.
+Traffic to that port only reaches the container running on that node.
+No routing mesh forwarding happens.
+
+Databases (e.g., PostgreSQL, Cassandra): You want clients to connect directly to the node hosting the database replica, not be routed elsewhere.
+
+DNS servers: Since DNS queries are latency-sensitive, binding directly to the host ensures faster responses.
+
+IoT or edge computing: Devices often need to connect to the exact node they’re paired with.
+
+For DNS service use below with host mode bypassing the routing mesh
+
+docker service create --name dns-cache \
+  --publish published=53,target=53,protocol=udp,mode=host \
+  --mode global \
+  dns-cache
+
+
+DNSRR (DNS Round Robin) :
+
+Instead of a single virtual IP (VIP), Docker resolves the service name into multiple IPs of the containers running that service.
+
+Clients connect directly to one of those IPs, chosen by their own DNS resolver.
+
+This removes Docker’s built-in load balancing and shifts responsibility to the client or external load balancer.
+
+Useful when you want direct client-to-container connections (e.g., for SIP servers or real-time apps). External load balancers consume DNS records and distribute traffic without Docker’s routing mesh.
+
+Telecom/VoIP servers (SIP, RTP): These protocols often require direct client-to-container connections for session persistence.
+
+High-performance apps (gaming servers, real-time analytics): DNSRR avoids the extra hop of the routing mesh, reducing latency.
+
+Custom load balancing setups: Enterprises may prefer HAProxy, F5, or cloud-native load balancers to handle traffic distribution instead of Docker’s VIP.
+
+docker service create \
+  --name realtime-app \
+  --endpoint-mode dnsrr \
+  --publish published=9000,target=9000,mode=host \
+  my-realtime-image
+
+
+
+External Load Balancer + Routing Mesh :
+
+The external load balancer (LB) forwards traffic to swarm nodes on the published port.
+
+The swarm’s routing mesh ensures that traffic is routed internally to whichever node is running the container.
+
+The LB doesn’t need to know which node has the container — Docker handles that.
+
+This is the most common setup in Docker microservices.
+
+Enterprises use HAProxy, NGINX, or cloud-native LBs (AWS ELB, Azure Load Balancer, GCP Load Balancer).
+
+Benefits: simplicity, automatic failover, no reconfiguration when containers move.
+
+Drawback: adds an extra hop (LB → swarm node → routing mesh → container).
+
+docker service create \
+  --name webapp \
+  --publish published=8080,target=80 \
+  nginx
+
+backend http_back
+   balance roundrobin
+   server node1 192.168.99.100:8080 check
+   server node2 192.168.99.101:8080 check
+   server node3 192.168.99.102:8080 check
+
+
+
+External Load Balancer + Host Mode :
+
+In host mode, the container port is bound directly to the node’s network stack.
+
+The LB forwards traffic only to nodes actually running the container.
+
+No routing mesh forwarding — traffic goes straight from LB → node → container.
+
+Used for stateful or latency-sensitive services (databases, DNS, VoIP).
+
+Ensures predictable networking: if LB sends traffic to a node, it always hits the container there.
+
+Drawback: requires careful LB configuration, since not all nodes may run the service.	
+
+
+docker service create \
+  --name dns-cache \
+  --publish published=53,target=53,protocol=udp,mode=host \
+  --mode global \
+  dns-cache
+
+
+External Load Balancer + DNSRR (No Routing Mesh) :
+
+With --endpoint-mode dnsrr, Docker provides DNS records for each container instance.
+
+The LB queries DNS, gets multiple IPs, and distributes traffic directly to containers.
+
+No VIP, no routing mesh — LB handles all balancing.
+
+Used in real-time apps (gaming, streaming, VoIP) where direct connections are critical.
+
+Also used when enterprises want full control of load balancing logic (weighted, geo-based, sticky sessions).
+
+Drawback: more complex LB setup, less “plug-and-play” than routing mesh.
+
+docker service create \
+  --name realtime-app \
+  --endpoint-mode dnsrr \
+  --publish published=9000,target=9000,mode=host \
+  my-realtime-image
+
+
+
+Setup				Theory						 Production Use			  Pros				        Cons
+LB + Routing Mesh LB → swarm node               Web apps, APIs,       Simple, automatic failover    Extra hop, 
+				  → routing mesh → container	 stateless services                               slight latency
+																				   
+							
+LB + Host Mode	  LB → node → container (direct) Databases,            Predictable networking       LB must  
+												DNS, latency-sensitive                            know which nodes 
+												apps		                                         run service
+
+LB + DNSRR	      LB queries DNS → container    Real-time apps, VoIP,  Direct connections,        Complex 	setup, 						IPs					custom LB setups	  flexible LB logic	
+                    		                           	        
+					
+					

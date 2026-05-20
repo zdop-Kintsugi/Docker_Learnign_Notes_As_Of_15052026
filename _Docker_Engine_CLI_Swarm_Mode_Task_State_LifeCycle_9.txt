@@ -1,0 +1,27 @@
+DOCKER SERVICE LIFECYCLE OF TASK STATUS
+
+A service defines desired state; tasks are execution units that run once to completion.
+
+Tasks are scheduled by manager nodes and executed by worker nodes. 
+
+Each task progresses forward through states — never backward (e.g., COMPLETE never returns to RUNNING).States are forward-only; once a task completes or fails, it doesn’t revert.
+
+Docker Swarm runs services as tasks, each representing a single container instance.
+
+Tasks move through a state machine (NEW → RUNNING → COMPLETE/FAILED).
+
+Managers schedule tasks, workers execute them, and you can monitor states with docker service ps OR docker service ps <service-name>.
+
+Production Use Case: Helps operators track service rollout, debug failures, and ensure workloads are distributed correctly across nodes.
+
+
+Real Production Use Cases :
+Debugging Failures: Investigate FAILED tasks to identify container errors.
+
+Scaling Services: Monitor READY/STARTING states during scale-up.
+
+Node Health Monitoring: Detect ORPHANED tasks when nodes go offline.
+
+Resource Planning: Use PENDING state visibility to adjust CPU/memory limits.
+
+Cluster Maintenance: Track SHUTDOWN/REMOVE states during service updates.

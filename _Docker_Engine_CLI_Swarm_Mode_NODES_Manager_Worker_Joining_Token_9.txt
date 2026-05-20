@@ -1,0 +1,62 @@
+DOCKER NODE JOINING MANAGER AND WORKER 
+
+A swarm starts with a single Docker Engine in Swarm mode.
+
+You can add worker nodes (increase capacity) or manager nodes (increase fault tolerance).
+
+Workers handle tasks without affecting manager consensus.
+
+Managers orchestrate and maintain cluster state, with one leader elected among them and are part of raft consensus.
+
+If the leader fails, another manager is elected automatically using raft consensus.
+
+Production Use Case: In a microservices deployment, adding workers scales workloads, while multiple managers ensure high availability during outages.
+
+The docker swarm join command does the following :
+
+Switches Docker Engine on the current node into Swarm mode.
+Requests a TLS certificate from the manager.
+Names the node with the machine hostname.
+Joins the current node to the swarm at the manager listen address based upon the swarm token.
+Sets the current node to Active availability, meaning it can receive tasks from the scheduler.
+Extends the ingress overlay network to the current node.
+
+
+Worker Node Joining :
+
+Run the provided docker swarm join command with the token and manager IP.
+
+The join process: switches node to Swarm mode, requests TLS cert, names node, joins cluster, sets availability to Active, and extends overlay network.
+
+Production Use Case: Adding workers during traffic spikes (e.g., e-commerce sale events) to handle increased load without disrupting managers.
+
+To add a worker, retrieve the join token.
+
+docker swarm join-token worker
+
+Joining token for worker to join worker in swarm mode cluster.
+
+docker swarm join \
+  --token SWMTKN-1-49nj1cmql0jkz5s954yi3oex3nedyz0fb0xx14ie39trti4wxv-8vxv8rssmk743ojnwacrr2e7c \
+  192.168.99.100:2377
+
+
+Manager Node Joining : 
+
+New managers participate in Raft consensus but only one remains the leader.
+
+Docker recommends 3 or 5 managers (odd number ensures quorum).
+
+Swarm continues functioning as long as a majority of managers are available.
+
+Production Use Case: Deploying critical financial applications where quorum-based consensus ensures resilience against node failures.
+
+Managers join using a manager token.
+
+docker swarm join-token manager
+
+Joining token for manager to join manager in swarm mode cluster.
+
+docker swarm join \
+  --token SWMTKN-1-61ztec5kyafptydic6jfc1i33t37flcl4nuipzcusor96k7kby-5vy9t8u35tuqm7vh67lrz9xp6 \
+  192.168.99.100:2377

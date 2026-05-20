@@ -1,0 +1,180 @@
+DOCKER SWARM MODE DEPLOYEMENT STAGES
+
+Swarm services are self-healing; if a node or container fails, the manager automatically restarts the task elsewhere to maintain your desired replica count.
+
+1. Swarm Cluster Setup (Linux) Requirements :
+
+Multiple Linux hosts with Docker Engine installed.
+Network connectivity between hosts.
+
+Stages & Commands:
+
+Initialize Swarm on Manager Node :
+
+docker swarm init
+
+Add Worker Nodes: On each worker, run the join command provided by docker swarm init (example) :
+
+docker swarm join --token <token> <manager-ip>:2377
+
+2. Service Creation Stages, Configuration, and Requirements Service Creation :
+
+Define the desired state: image, replicas, ports, resource constraints, etc.
+
+Example command :
+
+docker service create --name my_web --replicas 3 nginx
+
+For a global service (runs on every node) :
+
+docker service create --name myservice --mode global alpine top
+
+Configuration Options :
+
+Image and tag
+
+Number of replicas (--replicas)
+
+Port exposure (--publish)
+
+Resource constraints (--reserve-memory, --reserve-cpu)
+
+Placement constraints (node labels, etc.)
+
+Configuration Flags : 
+
+--env: Set environment variables. 
+
+--workdir: Set working directory. 
+
+--user: Set the UID or username.
+
+3. Registry Setup, Configuration, and Requirements Services pull images from a registry (Docker Hub or private).
+
+Registry Setup : To use private images, log in on your manager and use --with-registry-auth so worker nodes can pull the image.
+
+Ensure all nodes can access the registry.
+
+For private registries, configure authentication as needed.
+
+4. Updating Service and Editing Configuration/State Update service configuration (e.g., image, resources, environment) :
+
+docker service update --image nginx:latest my_web
+
+Update Image: docker service update --image <NEW_IMAGE> <SERVICE_NAME
+
+Scale Service: docker service scale <SERVICE_NAME>=<REPLICAS>
+
+Force Update: docker service update --force <SERVICE_NAME> (restarts all tasks).
+
+Docker maintains the desired state and performs rolling updates. 
+Rolling Updates: Docker updates tasks one by one to ensure zero downtime.
+
+Automatic Rollback: Configure --rollback-failure-action pause or continue to handle deployment failures automatically.
+
+Use --env-add for environment variables or --constraint-add to restrict where tasks run.
+
+5. Removing the Service :
+
+Remove a service :
+
+docker service rm my_web
+
+6. Service Status Management and Troubleshooting :
+
+List all services :
+
+docker service ls
+
+Inspect a service :
+
+docker service inspect my_web
+
+List tasks (containers) for a service :
+
+docker service ps my_web
+
+Check logs for a service :
+
+docker service logs my_web
+
+Status Management :
+
+List Services : 
+
+docker service ls   shows all services and their replica counts.
+
+List Tasks : 
+
+docker service ps <SERVICE_NAME> shows the status of each replica (Running, Pending, Failed).
+
+Inspect :  
+
+docker service inspect --pretty <SERVICE_NAME> provides detailed configuration. 
+
+Check Failures : If a service is stuck in "Pending," use docker service ps to see error messages (e.g., "no node fulfills constraints").
+
+7. Service Check-up on Different Nodes :
+
+Use docker service ps <service> to see which nodes are running the service’s tasks.
+
+Global vs. Replicated: Use --mode global to run one task on every node or --mode replicated for a specific count.
+
+Inspect individual tasks for node placement and status.
+
+Node View : Use docker node ls on the manager to see all nodes and their status. 
+
+Task Distribution : docker node ps <NODE_ID> lists all tasks currently running on a specific node.
+
+Placement Constraints : 
+
+Use --constraint node.labels.<key>==<value> to force services onto specific nodes (e.g., nodes with SSDs).
+
+Specific Task Logs : 
+
+SSH into the target node and use docker ps to find the local container ID, then 
+
+docker logs <CONTAINER_ID> for local debugging.
+
+8. Service Network Configuration (Public Exposure) :
+
+Overlay Network : 
+Create a private network for service communication :
+
+docker network create --driver overlay <NETWORK_NAME>
+
+Routing Mesh : When you publish a port (e.g., -p 8080:80), the service is reachable on every node's IP at port 8080, regardless of whether a task is running on that specific node. 
+
+Public IP Reaching : Map your external load balancer or DNS to any of the Swarm nodes' public IPs. The ingress mesh handles the internal routing to a healthy container.
+
+
+Expose service to public IP :
+ports:
+  - "8000:3000"
+  
+Or CLI :
+
+docker service create --name web --publish 8000:3000 nginx
+
+Swarm uses overlay networks for inter-service communication.
+
+9. Service Storage, Volume Configuration, Logs, and Data :
+
+Stateful applications require persistent storage and centralized logging.
+
+
+Volume Configuration : Use the --mount flag to attach persistent storage:docker service create --name <NAME> --mount type=volume,source=<VOL_NAME>,target=<PATH> <IMAGE>
+
+Bind Mounts : type=bind maps a host directory to the container. 
+
+Note : The path must exist on all nodes where the service might run. 
+
+Logging : Use docker service logs <SERVICE_NAME> to aggregate logs from all replicas across the cluster into a single stream.
+
+Attach volumes to services for persistent storage :
+
+docker service create --name db --mount type=volume,source=mydata,target=/data busybox
+
+Logs can be accessed via :
+
+docker service logs <service>

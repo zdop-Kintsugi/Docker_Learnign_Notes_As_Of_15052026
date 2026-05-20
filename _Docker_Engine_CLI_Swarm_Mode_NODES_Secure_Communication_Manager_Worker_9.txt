@@ -1,0 +1,78 @@
+DOCKER SWARM MODE SECURITY OF COMMUNICATION IN MANAGER's AND WORKER's NODES 
+
+
+Docker Swarm’s built-in PKI (Public Key Infrastructure) automates security by using mutual TLS (mTLS) to encrypt and authenticate all communication between nodes. When a swarm is initialized, the manager creates a Root Certificate Authority (CA) and generates unique join tokens containing a shared secret and a CA digest. 
+
+New nodes use these tokens to verify the manager, while the manager issues them a unique Node ID certificate defining their role (manager node or worker node). There are two tokens for each type of roles manger node role and worker node  role. This identity is cryptographically secure and, by default, automatically rotates every 90 days to minimize the impact of a compromised key.
+
+Production-Ready Use Cases :
+
+Zero-Trust Internal Networking : In high-security environments (like Fintech or Healthcare), Swarm PKI ensures that even if an attacker gains access to your internal network, they cannot intercept or spoof traffic between service containers because every node connection is encrypted and verified via mTLS.
+
+Automated Compliance : For organizations needing to meet PCI-DSS or SOC2 requirements, Swarm handles mandatory "encryption in transit" and "automated key rotation" out of the box without requiring third-party tools like HashiCorp Vault.
+
+Secure Multi-Cloud Clusters : When deploying a single swarm across different cloud providers or data centers, the PKI system secures traffic over the public internet, ensuring that manager-to-worker instructions remain private and tamper-proof.
+
+In a Docker Swarm, the root CA certificate secures communication between nodes.
+
+If compromised, you can rotate it using docker swarm ca --rotate.
+This generates a new CA certificate and a cross-signed certificate (new signed by old) so existing nodes still trust new certificates temporarily.
+All nodes then renew their TLS certificates with the new CA.Once complete, the old CA is discarded, and only the new CA is trusted. All nodes automatically renew their TLS certificates.
+Join tokens also change, meaning old tokens can’t add new nodes anymore. 
+This ensures secure, trusted communication across the swarm after a compromise or planned rotation.
+
+On Mirantis Kubernetes Engine (MKE), manual rotation isn’t allowed — you must contact Mirantis support.
+
+Production-Ready Real Use Cases :
+Compromised Manager Node: If a manager’s private key is leaked, rotating the CA prevents attackers from issuing fake certificates.
+
+Regular Security Hygiene: Enterprises rotate CA certificates periodically to reduce long-term exposure risks.
+
+External CA Integration: Organizations with centralized PKI can supply their own CA via --external-ca for compliance.
+
+Cluster Expansion: When adding new nodes after a rotation, only the new join tokens work, ensuring no unauthorized nodes join.
+
+Disaster Recovery: After suspected breach, rotating CA quickly restores trust across all nodes.
+
+This mechanism is critical in production clusters where secure communication between nodes ensures resilience against attacks and compliance with enterprise security policies.
+
+To check the CA status 
+
+docker swarm ca
+
+To rotate the CA certificate
+
+docker swarm ca --rotate
+
+To use external CA certificate
+
+docker swarm ca --rotate --external-ca <url_or_config>
+
+docker swarm ca --rotate --external-ca protocol=cfssl,url=https://ca.example.com:8888
+
+
+To rotate custom certificate and key
+
+docker swarm ca --rotate --external-ca <url_or_config>
+
+docker swarm ca --rotate --ca-cert /path/to/myCA.pem --ca-key /path/to/myCA.key
+
+
+To check if the rotation is complete
+
+docker swarm ca
+
+docker node ls
+
+To update the join token for manager and worker
+
+docker swarm join-token manager
+
+docker swarm join-token worker
+
+To get raw token only
+
+docker swarm join-token -q manager
+
+docker swarm join-token -q worker
+

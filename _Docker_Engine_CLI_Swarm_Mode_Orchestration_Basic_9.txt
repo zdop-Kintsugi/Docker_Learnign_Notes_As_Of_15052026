@@ -1,0 +1,377 @@
+DOCKER ENGINE AND CLI WITH SWARM MODE 
+
+Swarm mode is built into Docker Engine, allowing Docker hosts to act as managers (control cluster state) or workers (run tasks), or both.
+
+Docker Swarm mode is used to natively manage a cluster of Docker Engines, called a swarm, for deploying and orchestrating application services. It integrates cluster management directly into Docker Engine, allowing you to use the Docker CLI to create, manage, and scale services across multiple hosts without needing additional orchestration software. Swarm mode is ideal for production environments where you need automated scaling, service discovery, load balancing, and secure multi-host networking.
+
+Cluster Management with Docker Engine and CLI : Swarm mode enables native cluster management using the Docker CLI to create, manage, and deploy services across multiple Docker Engines.
+
+Decentralized design : Swarm uses a decentralized architecture where multiple manager nodes maintain cluster state and provide fault tolerance.
+
+Declarative service mode : You define the desired state for services (replicas, resources, networks) and Docker works to maintain that state automatically.
+
+Scaling : Services can be scaled up or down by adjusting the number of replicas, and Docker schedules tasks accordingly across the cluster.
+
+Desired State reconciliation : If a node or task fails, Docker automatically reschedules tasks to maintain the declared desired state.
+
+Multi-host networking : Swarm mode supports overlay networks, enabling containers to communicate securely across multiple hosts.
+
+Service discovery : Swarm provides built-in DNS server embedded service discovery, allowing containers to find and communicate with each other by service name. Each contianer can be queried using the DNS service discovery.
+
+Load balancing : Swarm automatically load balances requests across service replicas using the routing mesh.
+
+Security : Swarm mode includes features like mutual TLS, PKI, and manager node encryption key locking for secure cluster operation.
+
+Rolling updates : Swarm supports rolling updates, allowing you to update services with minimal downtime by gradually replacing old tasks with new ones.
+
+
+Manager nodes in a Docker Swarm manage the cluster, store the swarm state, and orchestrate tasks, while worker nodes only execute tasks assigned by managers. Proper deployment and maintenance require understanding these roles to ensure swarm reliability and availability.
+
+Operate manager nodes in a swarm Swarm manager nodes use the Raft Consensus Algorithm to manage the swarm state. You only need to understand some general concepts of Raft in order to manage a swarm. 
+
+Swarm manager nodes use the Raft Consensus Algorithm to maintain a consistent swarm state; a majority (quorum) of managers must agree on updates like node additions or removals.
+
+Raft requires a majority of managers, also called the quorum, to agree on proposed updates to the swarm, such as node additions or removals. Membership operations are subject to the same constraints as state replication.
+
+There is no strict limit on manager nodes, but more managers increase fault-tolerance at the cost of reduced write performance due to extra network round-trips for consensus.
+The number of managers is a trade-off: more managers mean higher availability but slower updates; Docker recommends an odd number of managers for quorum reliability.
+Membership changes and state replication both require quorum, so always maintain a majority of managers online to keep the swarm operational.
+
+To add a manager node, use the command from an existing manager
+
+docker swarm join --token <manager-token> <manager-ip>:2377
+
+To maintain quorum in a Docker Swarm, always keep a majority of manager nodes online—using an odd number (like 3 or 5) is best for fault tolerance. Losing quorum means you can't perform management tasks (like adding/removing nodes or updating services), though existing tasks on workers keep running. 
+
+If quorum is lost, restore failed managers or, if that's not possible, recover with below command and after recovery, re-add managers to restore high availability.
+
+docker swarm init --force-new-cluster --advertise-addr <node-ip>:2377
+
+Static IPs for managers prevent swarm instability.
+
+To configure a Docker Swarm manager node to advertise on a static IP address, use the --advertise-addr flag when initializing the swarm. This ensures other nodes can reliably contact the manager, preventing instability if IP addresses change after a reboot.
+
+To advertise the manager node 
+
+docker swarm init --advertise-addr <MANAGER-IP>
+
+Always use a fixed (static) IP for manager nodes. If managers get new IPs after a restart, the swarm can become unreachable, as nodes will try to contact old addresses.
+Dynamic IPs are acceptable for worker nodes, but not for managers.
+
+Adding manager nodes for fault tolerance :
+
+Maintain an odd number of manager nodes (e.g., 3, 5, 7) to maximize fault tolerance and ensure quorum during failures or network partitions. Odd number and distribution of managers maximize fault tolerance and quorum.
+Example: In a 5-manager swarm, you can lose up to 2 managers and still maintain quorum. If you lose 3, you lose quorum and cannot perform management tasks until recovery.
+
+The following command to add a manager node
+
+docker swarm join --token <MANAGER-TOKEN> <MANAGER-IP>:2377
+
+Distribute manager nodes :
+
+For high availability, spread manager nodes across at least three availability zones (e.g., 5 managers: 2-2-1 across three zones). This protects against zone-wide failures and helps maintain quorum.
+
+Manager-only nodes :
+
+By default, managers can also run tasks. For critical swarms, drain manager nodes to prevent them from running workloads and reduce the risk of resource starvation. Draining managers isolates management from workload, improving stability.
+
+docker node update --availability drain <NODE>
+
+This ensures managers focus on cluster management and Raft consensus, improving reliability.
+
+Worker nodes for load balancing :
+
+Add worker nodes to distribute service tasks and balance load. Use resource constraints to ensure tasks are scheduled on suitable nodes. Properly managed worker nodes ensure balanced service distribution.
+
+To monitor the health of Docker Swarm manager nodes, you can use both the Docker CLI and the nodes API. 
+
+Inspect individual node health and status :
+
+Monitoring manager node health is critical for swarm stability and availability.
+Prompt action on unreachable managers prevents loss of quorum and management capabilities.
+
+To check if a manager node is reachable by other managers 
+
+docker node inspect manager1 --format "{{ .ManagerStatus.Reachability }}"
+
+Output: reachable means the manager is healthy; unreachable means it cannot communicate with other managers.
+
+To check if a node is ready to accept tasks as a worker,  if we get Output: ready means the node can accept tasks.
+
+docker node inspect manager1 --format "{{ .Status.State }}"
+
+List all nodes and their status :
+
+To get an overview of the swarm health from a manager node
+
+docker node ls
+
+This command shows each node’s ID, hostname, membership, status, availability, and manager status (e.g., Leader, Reachable). 
+
+Actions for unreachable managers :
+
+If a manager node is unreachable, try restarting the Docker daemon or rebooting the machine.
+If the node remains unreachable, add another manager or promote a worker to manager. Remove the failed node cleanly.
+
+docker node demote <NODE>
+
+docker node rm <id-node>
+
+To properly troubleshoot and remove a Docker Swarm manager node.
+
+Never copy the raft directory :
+Do not copy the raft directory from another node to restart a manager. Each node’s data directory is unique to its node ID, and a node ID can only be used once to join the swarm. This ensures the integrity and uniqueness of the swarm’s consensus state.
+
+Cleanly re-join a manager node :
+If we need to re-add a manager node to the swarm (for example, after a failure or corruption)
+First Demote the node to a worker 
+
+docker node demote <NODE>
+
+Remove the node from the swarm
+
+docker node rm <NODE>
+
+Re-join the node to the swarm with a fresh state : On the node you want to re-add, use the join command (with the manager token) to rejoin
+
+docker swarm join --token <MANAGER-TOKEN> <MANAGER-IP>:2377
+
+This ensures the node joins as a new, clean member of the swarm.
+
+Forcibly remove a node :
+Normally, you should shut down a node before removing it with docker node rm.
+If a node is unreachable, unresponsive, or compromised, you can force its removal.
+
+docker node rm --force <NODE>
+
+Before forcefully removing a manager node, always demote it to a worker to maintain swarm stability and quorum.
+
+docker node demote <NODE>
+
+docker node rm --force <NODE>
+
+Maintain an odd number of manager nodes to ensure quorum and high availability. Removing or demoting a manager can impact the swarm’s ability to make decisions if quorum is lost. Maintaining an odd number of managers is critical for fault tolerance and avoiding split-brain scenarios.
+
+These steps prevent data corruption and maintain the integrity of the swarm’s consensus.
+
+To back up a Docker Swarm, the swarm state and manager logs are safely preserved.
+
+Understand What Needs Backing Up :
+The swarm state and manager logs are stored in the /var/lib/docker/swarm/ directory on manager nodes.
+This directory contains the keys used to encrypt Raft logs. Without these keys, you cannot restore the swarm. The /var/lib/docker/swarm directory is critical for swarm recovery; it contains encrypted logs and keys. Store compressed archives (e.g., swarm-backup.tgz) in a remote, encrypted location.
+
+Docker Daemon Logs : Standard system logs (accessible via journalctl -u docker) that record manager leadership elections, scheduling failures, and Raft consensus errors.Service-Level Audit Logs: Captured by centralized logging, these track service updates and replica changes.
+
+Critical State Files to PreserveThese files, located within /var/lib/docker/swarm/, define the cluster's existence and security. 
+Raft Logs (/raft/ subdirectory) : Stores the consistent state of the cluster, including service definitions, network configurations, and secrets.
+Encryption Keys : The certificates/swarm-node.key is used to encrypt Raft logs and secure TLS communication. Without this, you cannot restore the swarm even with a full backup.
+Unlock Key : If auto-lock is enabled, you must securely store the unlock key externally; it is required to decrypt the Raft logs upon manager restart.Node Certificates: Found in the /certificates/ folder, these allow nodes to authenticate with each other.
+
+Handle Auto-lock Key
+If your swarm uses auto-lock, you must have the unlock key to restore from backup. 
+
+To retrieve it with below command
+
+docker swarm unlock-key
+
+Store this key securely (e.g., in a password manager). Without it, you cannot unlock the swarm after restoration.
+
+Stop Docker daemon on the manager node to prevent changes during backup.
+
+sudo systemctl stop docker
+
+While you can perform a "hot" backup (with Docker running), it is not recommended, as restoring from such a backup may be unpredictable.
+
+Maintain Manager Quorum :
+When a manager is offline for backup, the swarm is more vulnerable to losing quorum. If you regularly take managers offline, consider running a five-manager swarm for extra fault tolerance.
+
+Back Up the Directory :
+Back up the entire /var/lib/docker/swarm directory using your preferred backup tool (e.g., tar, rsync, etc.)
+
+sudo tar czf swarm-backup.tar.gz /var/lib/docker/swarm
+
+Restart the Manager :
+After backup, restart Docker on the manager.
+
+sudo systemctl start docker
+
+
+Restore from a Backup :
+Shut down Docker on the target host
+Stop Docker on the machine where you want to restore the swarm. This ensures no data is being written during the restore process.
+
+Remove the existing swarm data :
+Delete the contents of the swarm state directory to avoid conflicts.
+
+sudo rm -rf /var/lib/docker/swarm/*
+
+This directory (/var/lib/docker/swarm/) holds all swarm state, including Raft logs and encryption keys.
+
+Restore the backup :
+Copy your previously backed-up /var/lib/docker/swarm directory to the same location on the new host.
+
+Note on encryption keys :
+The restored node will use the same encryption key for on-disk storage as the original. You cannot change these keys during restore.
+
+If your swarm had auto-lock enabled, you must have the original unlock key to access the swarm after restore.
+Start Docker and unlock the swarm (if needed)
+
+sudo systemctl start docker
+
+If auto-lock is enabled, unlock the swarm:
+
+docker swarm unlock
+
+Enter the unlock key when prompted.
+
+Re-initialize the swarm as a new cluster.
+
+Prevent the node from trying to contact old, now-missing managers :
+
+docker swarm init --force-new-cluster
+
+This makes the current node the sole manager and resets the cluster state.
+
+Verify the swarm state.
+Check that your services and configuration are as expected.
+
+docker service ls
+
+Perform any application-specific checks as needed.
+
+(Optional) Rotate the unlock key :
+If you use auto-lock, rotate the unlock key for security.
+
+docker swarm unlock-key --rotate
+
+Add manager and worker nodes.
+Bring your swarm back to full capacity by adding managers and workers as needed.
+
+Reinstate your backup regimen.
+Resume regular backups to protect your new swarm state.
+
+Recover from Losing the Quorum :
+Quorum is required for management :
+If you lose a majority of manager nodes, you cannot perform management operations (like scaling or updating services). Existing tasks on workers continue to run, but you cannot make changes.
+
+Best recovery :
+Bring the failed manager nodes back online to restore quorum.
+
+If not possible :
+Use the following command on a remaining manager to force a new cluster.
+
+docker swarm init --force-new-cluster --advertise-addr <node-ip>:2377
+
+This demotes all other managers, making the current node the only manager. You must then re-add managers to restore high availability.
+
+Force the Swarm to Rebalance :
+Swarm does not auto-rebalance tasks when new nodes join or reconnect. This avoids unnecessary disruption to running services.
+
+To force rebalance:
+Use the --force flag with docker service update to redistribute tasks (note: this restarts tasks and may disrupt clients)
+
+docker service update --force <service-name>
+
+Alternatively, scale the service up and down.
+
+This can help distribute tasks more evenly.
+
+docker service scale <service-name>=<new-replica-count>
+
+Use docker service ps <service-name> to check task distribution.
+
+Docker Swarm using docker stack deploy, including the relevant files, directories, and commands.
+
+When Docker Engine is running in Swarm mode, you can use the docker stack deploy command to deploy a complete application stack. This stack is described using a Compose file (specifically, the legacy Compose file version 3 format). The docker stack deploy command is not compatible with the latest Compose specification. It only supports the legacy version 3 format.
+
+Manager node: All stack and service commands must be run from a manager node in the swarm.
+Routing mesh: Docker’s built-in routing mesh allows you to access the app from any node on the published port.
+Stack file location: The Compose file (compose.yaml) should be in your project directory.
+
+Docker Engine in Swarm mode :
+
+To enable Swarm mode on your local machine
+
+docker swarm init
+
+For multi-node swarms, ensure you run all docker stack and docker service commands from a manager node.
+
+Compose file (version 3)
+
+Your application stack must be described in a Compose file (e.g., compose.yaml).
+
+Directory Structure and Files
+Here’s a typical directory structure for the example application:
+
+our-app-directory/
+├── app.py              # Main application code
+├── requirements.txt    # Python dependencies
+├── Dockerfile          # Image build instructions
+└── compose.yaml        # Stack description (Compose file)
+
+Files content in requirements.txt
+
+requirements.txt
+
+flask
+redis
+
+Dockerfile
+
+FROM python:3.4-alpine
+ADD . /code
+WORKDIR /code
+RUN pip install -r requirements.txt
+CMD ["python", "app.py"]
+
+compose.yaml
+
+services:
+  web:
+    image: 127.0.0.1:5000/stackdemo
+    build: .
+    ports:
+      - "8000:8000"
+  redis:
+    image: redis:alpine
+	
+Initialize Swarm Mode (if not already enabled) :
+
+docker swarm init
+
+Deploy the Stack :
+
+To deploy the stack on to the docker swarm cluster.
+
+docker stack deploy --compose-file compose.yaml stackdemo
+
+stackdemo is the stack name. All resources (networks, services, volumes) are prefixed with this name.
+
+Check Stack Services :
+
+To check the deployed services.
+
+docker stack services stackdemo
+
+Shows the status of services in the stack.
+
+Test the Application :
+
+Test the app.
+
+curl http://localhost:8000
+
+Access the app via the published port.
+
+Remove the Stack :
+
+To remove the stack.
+
+docker stack rm stackdemo
+
+Removes all services and networks associated with the stack.
+
+Leave Swarm Mode (optional, for local testing)
+
+docker swarm leave --force
+

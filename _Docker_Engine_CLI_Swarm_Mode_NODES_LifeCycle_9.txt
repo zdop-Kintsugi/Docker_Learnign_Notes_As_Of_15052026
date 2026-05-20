@@ -1,0 +1,81 @@
+DOCKER NODE MANAGEMENT AND NODES LIFECYCLE MONITORING
+
+The swarm management lifecycle of nodes :
+
+
+List nodes : Use docker node ls on a manager node to see a full list of all nodes in the swarm along with their current health and status. This command provides a quick overview of the cluster’s membership and whether nodes are active or down.
+
+To view a list of nodes in the swarm run from node manager.
+
+docker node ls
+
+Output of this the columns need to watch out are  HOSTNAME, STATUS, AVAILABILITY, MANAGER STATUS most of the case.
+
+AVAILABILITY :
+Active - means that the scheduler can assign tasks to the node.
+Pause - means the scheduler doesn't assign new tasks to the node, but existing tasks remain running.
+Drain - status means prevents new tasks from being assigned and forces existing tasks to shut down and migrate to other available nodes.
+
+MANAGER STATUS :
+Leader means the node is the primary manager node that makes all swarm management and orchestration decisions for the swarm.
+Reachable means the node is a manager node participating in the Raft consensus quorum when the leader node becomes unavailable, the node is eligible for election as the new leader.
+Unavailable means the node is a manager that can't communicate with other managers. 
+
+
+Inspect a node : Use docker node inspect <NODE-ID> to view detailed JSON information, such as the node’s IP address, OS version, and specific resource availability. This is the best way to troubleshoot individual nodes or check their specific configuration details.
+
+We can inspect the manager or worker node and get the output in json format.
+
+docker node inspect <NODE-ID> --pretty
+
+
+Update a node : Use docker node update to change node properties, such as promoting a worker to a manager or changing its availability to "drain" for maintenance. This allows you to manage how the swarm distributes tasks without actually removing any hardware.
+
+Changing node availability lets you:
+
+Drain a manager node so that it only performs swarm management tasks and is unavailable for task assignment.
+Drain a node so you can take it down for maintenance.
+Pause a node so it can't receive new tasks.
+Restore unavailable or paused nodes availability status.
+
+To drain the manager node 
+
+docker node update --availability drain node-1
+
+We can add and remove the labels on the node for the service deployment based on constrains of resources and compliance based like PCI-DSS. The --label-add flag supports either a <key> or a <key>=<value> pair.
+
+docker node update --label-add foo --label-add bar=baz node-1
+
+We can promote a worker node to the manager role. This is useful when a manager node becomes unavailable or if you want to take a manager offline for maintenance. Similarly, you can demote a manager node to the worker role.
+Regardless of your reason to promote or demote a node, you must always maintain a quorum of manager nodes in the swarm.
+
+To promote a node or set of nodes to manager run below command from manager node
+
+docker node promote node-3 node-2
+
+To demote a node or set of nodes to worker run below command from manager node
+
+docker node demote node-3 node-2
+
+We can manually install plugins on each/specific node or in globally to all nodes.
+Docker's log driver, network driver, volume driver, API and Engine plugins.
+
+
+Leave the swarm : Use docker swarm leave on a specific node to disconnect it from the cluster and stop all its running tasks. If you are removing the last manager, you must use the --force flag to shut down the swarm entirely.
+
+When a node leaves the swarm, Docker Engine stops running in Swarm mode. The orchestrator no longer schedules tasks to the node.
+
+To leave the swarm on a worker node.
+
+docker swarm leave
+
+If the node is a manager node, you receive a warning about maintaining the quorum. To override the warning, pass the --force flag. If the last manager node leaves the swarm, the swarm becomes unavailable requiring you to take disaster recovery measures. 
+While worker nodes leave freely, manager nodes require a --force flag to avoid disrupting the Raft quorum, necessitating a subsequent docker node rm on a manager to clean up the node list.
+
+After a node leaves the swarm, we can run below command on manager node to remove the node from the node list.
+
+docker node rm node-2
+
+Real-world applications include scaling infrastructure, decommissioning old hardware, and performing disaster recovery on failed nodes.
+
+

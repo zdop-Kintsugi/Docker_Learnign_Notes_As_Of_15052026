@@ -1,0 +1,420 @@
+DOCKER SWARM MODE NODES CREATION MANAGER-WORKER SETUP
+
+Prerequisites for Swarm Mode Node Creation (Manager):
+
+You need at least one Linux host with Docker Engine installed and running and network setup.
+For a multi-node swarm, you need three networked Linux hosts (can be physical, VMs, or cloud instances) that can communicate with each other.
+You can also test with a single host, but multi-node features won’t work fully.
+
+
+Create a Swarm
+
+SSH into the machine you want as the manager node.
+Run docker swarm init --advertise-addr <MANAGER-IP> to start a new swarm. This makes your current machine the manager.
+
+Open a terminal and ssh into the machine where you want to run your manager node. This tutorial uses a machine named manager1.
+
+docker swarm init --advertise-addr <MANAGER-IP>
+
+The command outputs a join token and instructions for adding worker or manager nodes to the swarm.
+The --advertise-addr flag configures the manager node to publish its address as 192.168.99.100. The other nodes in the swarm must be able to access the manager at the IP address.
+
+The output includes the commands to join new nodes to the swarm. Nodes will join as managers or workers depending on the value for the --token flag.
+
+docker swarm init --advertise-addr 192.168.99.100
+
+Swarm initialized: current node (dxn1zf6l61qsb1josjja83ngz) is now a manager.
+
+To add a worker to this swarm, run the following command:
+
+    docker swarm join \
+    --token SWMTKN-1-49nj1cmql0jkz5s954yi3oex3nedyz0fb0xx14ie39trti4wxv-8vxv8rssmk743ojnwacrr2e7c \
+    192.168.99.100:2377
+
+To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.
+
+To retrive the join command from manager node to retrieve the join command for a worker node.
+
+docker swarm join-token worker
+
+To add a worker to this swarm, run the following command:
+
+    docker swarm join \
+    --token SWMTKN-1-49nj1cmql0jkz5s954yi3oex3nedyz0fb0xx14ie39trti4wxv-8vxv8rssmk743ojnwacrr2e7c \
+    192.168.99.100:2377
+
+
+Use docker info to see the current state of your Docker Engine and swarm.
+
+To check Swarm Status
+
+docker info
+
+Containers: 2
+Running: 0
+Paused: 0
+Stopped: 2
+  ...snip...
+Swarm: active
+  NodeID: dxn1zf6l61qsb1josjja83ngz
+  Is Manager: true
+  Managers: 1
+  Nodes: 1
+-------------------* Output of check command* -----------
+
+The shows details like whether the node is a manager, the number of nodes, and the swarm’s status.
+
+
+List Nodes in the Swarm
+
+Run docker node ls to view all nodes in the swarm.
+To command to view information about nodes:
+
+docker node ls
+
+ID                           HOSTNAME  STATUS  AVAILABILITY  MANAGER STATUS
+dxn1zf6l61qsb1josjja83ngz *  manager1  Ready   Active        Leader
+
+The output lists node IDs, hostnames, status, availability, and manager status. 
+The * next to the node ID indicates that you're currently connected on this node.
+Docker Engine Swarm mode automatically names the node with the machine host name.
+
+These steps help you set up and verify a Docker Swarm cluster, starting with the manager node.
+
+
+Prerequisites for Swarm Worker Node Creation:
+
+You need at least one manager node already created in the swarm.
+Each worker node must be a Linux host with Docker Engine installed and running.
+All nodes (manager and workers) must be networked and able to communicate with each other.
+SSH access to each host is required.
+
+
+Add nodes to the swarm
+
+SSH into the machine you want to add as a worker node.
+Run the docker swarm join command (with the token and manager IP) provided by the manager node after swarm initialization.
+
+Open a terminal and ssh into the machine where you want to run a worker node. This tutorial uses the name worker1 and 2 and as many.
+
+docker swarm join \
+  --token  SWMTKN-1-49nj1cmql0jkz5s954yi3oex3nedyz0fb0xx14ie39trti4wxv-8vxv8rssmk743ojnwacrr2e7c \
+  192.168.99.100:2377
+
+This node joined a swarm as a worker.
+
+If you don’t have the join command, you can retrieve it from the manager node using docker swarm join-token worker.
+
+docker swarm join-token worker
+
+To add a worker to this swarm, run the following command:
+
+    docker swarm join \
+    --token SWMTKN-1-49nj1cmql0jkz5s954yi3oex3nedyz0fb0xx14ie39trti4wxv-8vxv8rssmk743ojnwacrr2e7c \
+    192.168.99.100:2377
+
+
+Add additional worker nodes
+
+Repeat the SSH and docker swarm join steps on any additional machines you want to add as workers.
+Each worker node joins the swarm and is ready to run tasks.
+
+
+Verify nodes in the swarm
+
+Open a terminal and ssh into the machine where the manager node runs and run the docker node ls command to see the worker nodes:
+SSH into the manager node and run docker node ls to see all nodes in the swarm.
+
+docker node ls
+ID                           HOSTNAME  STATUS  AVAILABILITY  MANAGER STATUS
+03g1y59jwfg7cf99w4lt0f662    worker2   Ready   Active
+9j68exjopxe7wfl6yuxml7a7j    worker1   Ready   Active
+dxn1zf6l61qsb1josjja83ngz *  manager1  Ready   Active        Leader
+
+The output lists all nodes, their status, and which are managers or workers. Only manager nodes can run swarm management commands like docker node ls.
+The MANAGER column identifies the manager nodes in the swarm. The empty status in this column for worker1 and worker2 identifies them as worker nodes.
+
+Swarm management commands like docker node ls only work on manager nodes.
+After you create a swarm, you can deploy a service to the swarm manager and worker nodes. 
+
+
+Service Deployment in Swarm :
+
+Swarm services use a declarative model: you define the desired state (image, replicas, ports, etc.), and Docker maintains it automatically. This lets you scale, update, and manage your app easily across multiple nodes.
+You can deploy services directly using the docker service command, or as part of a stack using the docker stack deploy command with a Compose file.
+You can remove stacks with docker stack rm mystack or individual services with docker service rm servicename.
+
+Stack-Based Deployment
+Stack deployment uses a Compose file (YAML) to describe your entire application (services, networks, volumes).
+Deploy swarm service with stack :
+
+docker stack deploy --compose-file compose.yaml mystack
+
+To remove service deployed by stack
+
+docker stack rm mystack
+
+Swarm creates all defined services and networks, and you can check their status with docker stack services mystack.
+Stacks are useful for managing multi-service applications as a single unit.
+
+Non-Stack-Based (Direct Service) Deployment
+You can deploy a single service directly with :
+
+docker service create --name myservice -p 8000:80 nginx
+
+To remove service deployed by non-stack
+
+docker service rm myservice
+
+This method is simpler for single services or quick tests, but less suited for complex, multi-service apps.
+You manage each service individually, without the grouping and orchestration features of stacks.
+
+docker service create --replicas 1 --name helloworld alpine ping docker.com
+
+9uk4639qpg7npwf3fn2aasksr
+
+The docker service create command creates the service.
+The --name flag names the service helloworld.
+The --replicas flag specifies the desired state of 1 running instance.
+The arguments alpine ping docker.com define the service as an Alpine Linux container that executes the command ping docker.com.
+
+Swarm’s built-in routing mesh lets you access your service on any node at the published port.
+
+To list the running services 
+
+docker service ls
+
+ID            NAME        SCALE  IMAGE   COMMAND
+9uk4639qpg7n  helloworld  1/1    alpine  ping docker.com
+
+
+Inspect a Service on the Swarm :
+
+After deploying a service, SSH into your manager node (e.g., manager1).
+Run docker service inspect --pretty <SERVICE-ID> to see human-readable details about the service, such as its name, image, mode, replicas, and configuration.
+
+To get the pretty printed services.
+
+docker service inspect --pretty <SERVICE-ID>
+
+docker service inspect --pretty helloworld
+
+To get the output in JSON format, use docker service inspect <SERVICE-ID> without the --pretty flag.
+
+docker service inspect <SERVICE-ID>
+
+docker service inspect helloworld
+
+View Service Tasks and Placement :
+Run docker service ps <SERVICE-ID> to see which nodes are running the service tasks.
+
+To list the service details 
+
+docker service ps <SERVICE-ID>
+
+docker service ps helloworld
+
+This shows the task name, image, node, desired state, and current state, helping you verify where and how your service is running.
+
+Inspect the Running Container :
+SSH into the node where the service task is running (if it’s not the manager).
+Use below command on that node to see details about the running container, including its ID, image, command, and status.
+
+docker ps
+
+
+Scale the service in the swarm 
+
+Scaling a Service After Deployment : 
+Once your service is running, you can change the number of replicas (containers) using the docker service scale command.
+
+To scale the service.
+
+docker service scale <SERVICE-NAME>=5
+
+docker service scale helloworld=5
+
+helloworld scaled to 5
+
+This sets the service to run 5 replicas.
+Docker Swarm automatically adds or removes containers to match the desired count.
+
+Scaling a Service at Deployment :
+You can set the number of replicas when you first create the service using the --replicas flag.
+
+To scale the service at deployment.
+
+docker service create --name <SERVICE-NAME> --replicas 3 <IMAGE>
+
+This starts the service with 3 replicas immediately.
+The service will maintain this number of running containers across the swarm.
+
+How Scaling Works :
+Swarm’s declarative model ensures the service always matches the desired replica count.
+If a container fails, Swarm replaces it to maintain the set number of replicas.
+The tasks are distributed between the three nodes of the swarm.
+
+To verify the number of running tasks with:
+
+docker service ps <SERVICE-NAME>
+
+docker service ps helloworld
+
+NAME                                    IMAGE   NODE      DESIRED STATE  CURRENT STATE
+helloworld.1.8p1vev3fq5zm0mi8g0as41w35  alpine  worker2   Running        Running 7 minutes
+helloworld.2.c7a7tcdq5s0uk3qr88mf8xco6  alpine  worker1   Running        Running 24 seconds
+helloworld.3.6crl09vdcalvtfehfh69ogfb1  alpine  worker1   Running        Running 24 seconds
+helloworld.4.auky6trawmdlcne8ad8phb0f1  alpine  manager1  Running        Running 24 seconds
+helloworld.5.ba19kca06l18zujfwxyc5lkyn  alpine  worker2   Running        Running 24 seconds
+
+To see the containers running on the node where you're connected.
+
+docker ps
+
+
+Delete the service running on the swarm :
+
+We can remove stacks with docker stack rm mystack or individual services with docker service rm servicename.
+
+To remove service deployed by non-stack
+
+docker service rm myservice
+
+
+To remove service deployed by stack
+
+docker stack rm mystack
+
+To verify that the swarm manager removed the service. The CLI returns a message that the service is not found.
+
+docker service inspect helloworld
+
+Status: Error: no such service: helloworld, Code: 1
+
+We can use docker ps on the nodes to verify when the tasks have been removed.
+
+docker ps
+
+
+Apply rolling updates to a service : 
+
+Rolling Update : 
+Rolling updates let you update a service’s containers incrementally, not all at once.
+The swarm manager controls how many containers update at a time and the delay between updates.
+If an update fails, the process pauses, and you can roll back to the previous version.
+
+To apply update to an service container
+
+docker service update --image <containerimage:tag> redis
+
+docker service update --image redis:7.4.1 redis
+
+To check the update has been applied 
+
+docker service inspect --pretty redis
+
+This shows the current image, update configuration, and whether the update paused due to failure.
+
+To restart a paused update run 
+
+docker service update redis
+
+To view the update is rolling
+
+docker service ps redis
+
+To update policy is set when creating the service
+
+docker service create --name redis --replicas 3 --update-delay 10s --update-parallelism 1 redis:7.4.0
+
+--update-parallelism controls how many containers update at once.
+--update-delay sets the wait time between updates.
+If a task fails during update, the update pauses.
+
+Rollback Methods :
+Automatic rollback : You can configure rollback options when creating the service (e.g., --rollback-parallelism, --rollback-monitor, --rollback-max-failure-ratio).
+
+Strict Stability (Zero Tolerance)
+For critical services, you might want to rollback immediately if even a single container fails its health check.
+
+docker service update \
+  --image my-app:v2 \
+  --update-failure-action rollback \
+  --rollback-max-failure-ratio 0 \
+  --rollback-order stop-first
+
+
+Quick Recovery (Parallel Rollback)
+If an update fails, you often want to restore the known-good version as quickly as possible. You can set the rollback to happen faster than the original update by increasing parallelism. 
+
+docker service create \
+  --name web-app \
+  --replicas 10 \
+  --update-parallelism 2 \
+  --update-failure-action rollback \
+  --rollback-parallelism 5 \
+  --rollback-monitor 10s
+
+
+Manual rollback : 
+
+If an update fails or you want to revert, use below command :
+
+docker service rollback redis
+
+The service returns to the previous version.
+
+
+Drain a node on the swarm :
+
+All the nodes have been running with Active availability. The swarm manager can assign tasks to any Active node, so up to now all nodes have been available to receive tasks.
+
+A planned maintenance times, you need to set a node to Drain availability. Drain availability prevents a node from receiving new tasks from the swarm manager. It also means the manager stops tasks running on the node and launches replica tasks on a node with Active availability.
+
+Setting a node to Drain does not remove standalone containers from that node, such as those created with docker run, docker compose up, or the Docker Engine API. A node's status, including Drain, only affects the node's ability to schedule swarm service workloads.
+
+To verify that all the nodes are actively available.
+
+docker node ls
+
+
+To see how the swarm manager assigned the tasks to different nodes. In this case the swarm manager distributed one task to each node.
+
+docker service ps redis
+
+NAME                               IMAGE        NODE     DESIRED STATE  CURRENT STATE
+redis.1.7q92v0nr1hcgts2amcjyqg3pq  redis:7.4.0  manager1 Running        Running 26 seconds
+redis.2.7h2l8h3q3wqy5f66hlv9ddmi6  redis:7.4.0  worker1  Running        Running 26 seconds
+redis.3.9bg7cezvedmkgg6c8yzvbhwsd  redis:7.4.0  worker2  Running        Running 26 seconds
+
+The swarm manager maintains the desired state by ending the task on a node with Drain availability and creating a new task on a node with Active availability.
+
+docker service ps redis
+
+NAME                                    IMAGE        NODE      DESIRED STATE  CURRENT STATE           ERROR
+redis.1.7q92v0nr1hcgts2amcjyqg3pq       redis:7.4.0  manager1  Running        Running 4 minutes
+redis.2.b4hovzed7id8irg1to42egue8       redis:7.4.0  worker2   Running        Running About a minute
+ \_ redis.2.7h2l8h3q3wqy5f66hlv9ddmi6   redis:7.4.0  worker1   Shutdown       Shutdown 2 minutes ago
+redis.3.9bg7cezvedmkgg6c8yzvbhwsd       redis:7.4.0  worker2   Running        Running 4 minutes
+
+
+To drain a node that had a task assigned to it :
+
+docker node update --availability drain worker1
+
+To inspect the node to check its availability. The drained node shows Drain for Availability.
+
+docker node inspect --pretty worker1.
+
+When you set the node back to Active availability, it can receive new tasks.
+
+To return the drained node to an active state.
+
+docker node update --availability active worker1
+
+
+
+
+
+
+

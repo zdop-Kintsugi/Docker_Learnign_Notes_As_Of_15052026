@@ -1,0 +1,147 @@
+DOCKER SWARM MODE DEPLOYMENT USING STACK
+
+
+Set Up a Docker Registry :
+A registry is needed to distribute images across all nodes in a Docker Swarm. You can use Docker Hub or create a local registry.
+
+Create a local registry as a service :
+
+docker service create --name registry --publish published=5000,target=5000 registry:2
+This starts a registry container, accessible at 127.0.0.1:5000.
+
+Check registry status :
+
+docker service ls 
+
+Look for registry with 1/1 under REPLICAS.
+
+Test registry :
+
+curl http://127.0.0.1:5000/v2/
+
+Should return {} if running.
+
+Create the Example Application :
+
+Create a project directory :
+
+mkdir stackdemo
+cd stackdemo
+
+All files below are created inside stackdemo.
+
+Create app.py file:
+
+from flask import Flask
+
+from redis import Redis
+
+app = Flask(__name__)
+redis = Redis(host='redis', port=6379)
+
+@app.route('/')
+def hello():
+    count = redis.incr('hits')
+    return 'Hello World! I have been seen {} times.\n'.format(count)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000, debug=True)
+Path: stackdemo/app.py
+
+Create requirements.txt file and to run app.py :
+
+flask
+redis
+Path: stackdemo/requirements.txt
+
+Create Dockerfile file for container runtime and container build image creation :
+
+# syntax=docker/dockerfile:1
+FROM python:3.4-alpine
+ADD . /code
+WORKDIR /code
+RUN pip install -r requirements.txt
+CMD ["python", "app.py"]
+Path: stackdemo/Dockerfile
+
+
+Create compose.yaml deployment of services of docker :
+
+services:
+  web:
+    image: 127.0.0.1:5000/stackdemo
+    build: .
+    ports:
+      - "8000:8000"
+  redis:
+    image: redis:alpine
+Path: stackdemo/compose.yaml
+The web app image is tagged for the local registry (127.0.0.1:5000/stackdemo).
+
+Test the App with Compose :
+
+Build and run locally :
+
+docker compose up -d
+
+Builds the web image, pulls Redis, and starts containers.
+
+Check running containers :
+
+docker compose ps
+
+Test the app :
+
+curl http://localhost:8000
+
+Should increment the counter each time.
+
+Bring down the app :
+
+docker compose down --volumes
+
+Push the Image to the Registry :
+
+Push the web image :
+
+docker compose push
+
+Uploads the built image to the local registry at 127.0.0.1:5000.
+
+Deploy the Stack to the Swarm.
+
+Deploy using Swarm :
+
+docker stack deploy --compose-file compose.yaml stackdemo
+
+Creates services and network prefixed with stackdemo.
+
+Check stack services :
+
+docker stack services stackdemo
+
+Shows status and image details.
+
+Test the app (Swarm routing mesh):
+
+curl http://localhost:8000
+
+curl http://address-of-other-node:8000
+
+Requests are routed to the app from any node.
+
+Clean Up :
+Remove the stack :
+
+docker stack rm stackdemo
+
+Removes services and network.
+
+Remove the registry :
+
+docker service rm registry
+
+Leave Swarm mode (optional) :
+
+docker swarm leave --force
+

@@ -1,0 +1,589 @@
+DOCKER CONFIGURATION DATA MANAGEMENT WITH DOCEKR CONFIGS
+
+Docker configs are used to store non-sensitive configuration data (like config files) outside container images.
+
+Difference from secrets: Unlike secrets, configs are not encrypted at rest and are mounted directly into the container filesystem.
+
+Key points:
+
+Configs can be shared across services.
+
+They support strings or binary content up to 500 KB.
+
+Only available for swarm services, not standalone containers.
+
+
+Configs are stored in the encrypted Raft log (but logs encrypted configs in plain text, replicated across managers).
+
+Mounted as files in containers:
+
+Linux: /<config-name>
+
+Windows: C:\<config-name>
+
+Configs decouple configuration from images → makes images reusable and generic.
+
+Immutable configs → ensures consistency and version control.
+
+Integration with secrets → secure handling of sensitive + non-sensitive data together.
+
+Flexibility → configs can be updated, rotated, or templated without rebuilding images.
+
+Rotation ensures smooth updates without downtime or image rebuilds.
+
+
+To create a config 
+
+docker config create
+
+To view and inspect the config's configuration
+
+docker config inspect
+
+To list the configs available
+
+docker config ls
+
+To remove the configs
+
+docker config rm
+
+
+Useful commands to handle deployment with configs 
+
+docker stack deploy
+
+docker stack rm
+
+docker service update
+
+
+Ownership and permissions can be set (ignored on Windows).
+
+Configs are immutable — to update, create a new config and redeploy.
+
+For single service :
+
+Create config:
+
+echo "This is a config" | docker config create my-config -
+
+To list the configs 
+
+docker config ls
+
+Attach to service:
+
+docker service create --name redis --config my-config redis:alpine
+
+Inspect config inside container verifying the configs 
+
+docker container exec $(docker ps --filter name=redis -q) ls -l /my-config
+
+docker container exec $(docker ps --filter name=redis -q) cat /my-config
+
+
+Redis service :
+
+Create a config:
+
+echo "This is a config" | docker config create my-config -
+
+Attach config to a service:
+
+docker service create --name redis --config my-config redis:alpine
+
+Inspect config inside container:
+
+docker container exec $(docker ps --filter name=redis -q) cat /my-config
+
+Remove config from service:
+
+docker service update --config-rm my-config redis
+
+This shows how configs are mounted as files (/my-config) and can be dynamically added/removed without rebuilding images.
+
+
+Nginx with TLS :
+
+This is a more realistic production-style setup where configs and secrets work together.
+
+Generate TLS Certificates :
+
+Use openssl to create a root CA, site key, and site certificate.
+
+Generate a root key.
+
+openssl genrsa -out "root-ca.key" 4096
+
+Generate a CSR using the root key.
+
+
+openssl req \
+         -new -key "root-ca.key" \
+         -out "root-ca.csr" -sha256 \
+         -subj '/C=US/ST=CA/L=San Francisco/O=Docker/CN=Swarm Secret Example CA'
+		 
+Configure the root CA. Edit a new file called root-ca.cnf and paste the following contents into it. This constrains the root CA to only sign leaf certificates and not intermediate CAs.
+
+
+[root_ca]
+basicConstraints = critical,CA:TRUE,pathlen:1
+keyUsage = critical, nonRepudiation, cRLSign, keyCertSign
+subjectKeyIdentifier=hash
+Sign the certificate.
+
+
+openssl x509 -req -days 3650 -in "root-ca.csr" \
+              -signkey "root-ca.key" -sha256 -out "root-ca.crt" \
+              -extfile "root-ca.cnf" -extensions \
+              root_ca
+			   
+Generate the site key.
+
+openssl genrsa -out "site.key" 4096
+
+Generate the site certificate and sign it with the site key.
+
+
+openssl req -new -key "site.key" -out "site.csr" -sha256 \
+         -subj '/C=US/ST=CA/L=San Francisco/O=Docker/CN=localhost'
+		 
+Configure the site certificate. Edit a new file called site.cnf and paste the following contents into it. This constrains the site certificate so that it can only be used to authenticate a server and can't be used to sign certificates.
+
+
+[server]
+authorityKeyIdentifier=keyid,issuer
+basicConstraints = critical,CA:FALSE
+extendedKeyUsage=serverAuth
+keyUsage = critical, digitalSignature, keyEncipherment
+subjectAltName = DNS:localhost, IP:127.0.0.1
+subjectKeyIdentifier=hash
+Sign the site certificate.
+
+
+openssl x509 -req -days 750 -in "site.csr" -sha256 \
+   -CA "root-ca.crt" -CAkey "root-ca.key" -CAcreateserial \
+   -out "site.crt" -extfile "site.cnf" -extensions server
+	
+The site.csr and site.cnf files are not needed by the Nginx service, but you need them if you want to generate a new site certificate. Protect the root-ca.key file
+
+
+Store them as secrets:
+
+docker secret create site.key site.key
+docker secret create site.crt site.crt
+
+Create Nginx Config
+
+Save config file (site.conf) with HTTPS settings:
+
+server {
+    listen 443 ssl;
+    server_name localhost;
+    ssl_certificate /run/secrets/site.crt;
+    ssl_certificate_key /run/secrets/site.key;
+    location / {
+        root /usr/share/nginx/html;
+        index index.html index.htm;
+    }
+}
+
+Store it as a Docker config:
+
+docker config create site.conf site.conf
+
+Deploy Nginx Service :
+
+Attach secrets + config:
+
+docker service create \
+     --name nginx \
+     --secret site.key \
+     --secret site.crt \
+     --config source=site.conf,target=/etc/nginx/conf.d/site.conf,mode=0440 \
+     --publish published=3000,target=443 \
+     nginx:latest \
+     sh -c "exec nginx -g 'daemon off;'"
+
+Now the container has:
+
+/run/secrets/site.key
+
+/run/secrets/site.crt
+
+/etc/nginx/conf.d/site.conf
+
+Verify Service :
+
+Check service status:
+
+docker service ls
+
+docker service ps nginx
+
+Test HTTPS endpoint:
+
+curl --cacert root-ca.crt https://0.0.0.0:3000
+
+openssl s_client -connect 0.0.0.0:3000 -CAfile root-ca.crt
+
+
+
+Config Rotation :
+
+Configs are immutable, so to update:
+
+Create new config (site-v2.conf).
+
+docker config create site-v2.conf site.conf
+
+Update service to use new config.
+
+docker service update \
+  --config-rm site.conf \
+  --config-add source=site-v2.conf,target=/etc/nginx/conf.d/site.conf,mode=0440 \
+  nginx
+  
+Remove old config.
+
+docker config rm site.conf
+
+
+Work flow for real application use case of configs
+
+Generate TLS Certificates :
+Sensitive
+Create a root CA, site key, and site certificate to enable HTTPS.
+
+Use openssl to generate root key and certificate
+
+Create site key and CSR
+
+Sign site certificate with root CA
+
+Protect private keys securely
+
+openssl` commands- Create a root CA key and certificate
+
+Generate a site key and CSR
+
+Sign the site certificate with the root CA
+
+Protect the private key files
+
+Store Keys as Secrets :
+Secure
+Keep sensitive files like TLS keys and certs safe using Docker secrets.
+
+docker secret create-docker secret create site.key site.key 
+
+or below
+
+Run docker secret create site.key site.key
+
+Run docker secret create site.crt site.crt
+
+Verify with docker secret ls
+
+Create Nginx Config :
+Config
+Define HTTPS settings in Nginx and reference secrets.
+
+Save config as site.conf
+
+Configure ssl_certificate and ssl_certificate_key
+
+Point to /run/secrets/site.crt and /run/secrets/site.key
+
+Add location block for serving static files
+
+Define HTTPS settings and reference secrets in Nginx.
+
+site.conf- Configure ssl_certificate and ssl_certificate_key
+
+Point to /run/secrets/site.crt and /run/secrets/site.key
+
+Add location block for serving static files
+
+Store Config in Docker : 
+Decouple non-sensitive configuration from images.
+
+Create config withdocker config create
+
+Run docker config create site.conf site.conf
+
+Verify with docker config ls
+
+Configs decouple non-sensitive configuration from images.
+
+Deploy Nginx Service :
+Production
+Attach both secrets and config to the Nginx container.
+
+Use docker service create with --secret and --config
+
+Publish HTTPS port with --publish published=3000,target=443
+
+Start Nginx in foreground
+
+docker service create- Attach secrets:--secret site.key --secret site.crt`
+
+Attach config: --config source=site.conf,target=/etc/nginx/conf.d/site.conf,mode=0440
+
+Publish HTTPS port: --publish published=3000,target=443
+
+Verify HTTPS Service :
+Ensure Nginx is running and serving HTTPS correctly.
+
+Check service status with docker service ls
+
+Inspect tasks with docker service ps nginx
+
+docker service ls and curl- Check service status withdocker service ls`
+
+Test HTTPS endpoint: curl --cacert root-ca.crt https://0.0.0.0:3000
+
+Rotate Configs for Updates :
+Immutable
+Configs are immutable, so updates require rotation.
+
+Create new config: docker config create site-v2.conf site.conf
+
+docker service update- Create new config:docker config create site-v2.conf site.conf
+
+Update service with docker service update --config-rm site.conf --config-add site-v2.conf
+
+docker service update --config-rm site.conf --config-add source=site-v2.conf,target=/etc/nginx/conf.d/site.conf,mode=0440 nginx
+
+Remove old config after redeployment
+
+docker config rm site.conf
+
+Secrets → Secure sensitive files (TLS keys/certs).
+
+Configs → Store non-sensitive settings (Nginx config).
+
+Immutable configs → Rotation ensures smooth updates without downtime.
+
+Decoupling → Same Nginx image can serve multiple sites with different configs.
+
+Why this matters: In production, you don’t want to rebuild images every time configuration changes. Using configs and secrets allows you to:
+
+Run multiple sites with the same Nginx image but different configs.
+
+Securely manage TLS certificates and keys.
+
+Rotate configs seamlessly without downtime.
+
+Outcome: A scalable, secure, and maintainable deployment model where sensitive data (secrets) and non-sensitive configs are managed independently.
+
+Docker Compose File with Secrets & Configs :
+
+version: "3.8"
+
+services:
+  nginx:
+    image: nginx:latest
+    deploy:
+      replicas: 1
+    ports:
+      - "3000:443"
+    secrets:
+      - site.key
+      - site.crt
+    configs:
+      - source: site.conf
+        target: /etc/nginx/conf.d/site.conf
+        mode: 0440
+    command: ["nginx", "-g", "daemon off;"]
+
+secrets:
+  site.key:
+    file: ./site.key
+  site.crt:
+    file: ./site.crt
+
+configs:
+  site.conf:
+    file: ./site.conf
+
+
+docker stack deploy -c docker-compose.yml my-stack
+
+Nginx Multi‑Site Docker Compose Example :
+
+version: "3.8"
+
+services:
+  nginx:
+    image: nginx:latest
+    deploy:
+      replicas: 1
+    ports:
+      - "443:443"
+    secrets:
+      - site1.key
+      - site1.crt
+      - site2.key
+      - site2.crt
+    configs:
+      - source: site1.conf
+        target: /etc/nginx/conf.d/site1.conf
+        mode: 0440
+      - source: site2.conf
+        target: /etc/nginx/conf.d/site2.conf
+        mode: 0440
+    command: ["nginx", "-g", "daemon off;"]
+
+secrets:
+  site1.key:
+    file: ./site1.key
+  site1.crt:
+    file: ./site1.crt
+  site2.key:
+    file: ./site2.key
+  site2.crt:
+    file: ./site2.crt
+
+configs:
+  site1.conf:
+    file: ./site1.conf
+  site2.conf:
+    file: ./site2.conf
+
+Nginx Configs for Each Site 
+
+site1.conf
+server {
+    listen 443 ssl;
+    server_name site1.com;
+    ssl_certificate /run/secrets/site1.crt;
+    ssl_certificate_key /run/secrets/site1.key;
+
+    location / {
+        root /usr/share/nginx/html/site1;
+        index index.html;
+    }
+}
+
+site2.conf
+server {
+    listen 443 ssl;
+    server_name site2.com;
+    ssl_certificate /run/secrets/site2.crt;
+    ssl_certificate_key /run/secrets/site2.key;
+
+    location / {
+        root /usr/share/nginx/html/site2;
+        index index.html;
+    }
+}
+
+Generate certs/keys for each domain (site1.com, site2.com) using Let’s Encrypt or OpenSSL.
+
+Create secrets for each cert/key pair:
+
+docker secret create site1.key site1.key
+docker secret create site1.crt site1.crt
+docker secret create site2.key site2.key
+docker secret create site2.crt site2.crt
+
+Create configs for each Nginx site configuration:
+
+docker config create site1.conf site1.conf
+docker config create site2.conf site2.conf
+
+Deploy stack:
+
+docker stack deploy -c docker-compose.yml multi-nginx
+
+Verify:
+
+docker service ls
+
+Access https://site1.com and https://site2.com with proper TLS certs.
+
+Step‑by‑Step Rotation Workflow :
+
+Update Config Files
+Edit your Nginx site config (site1.conf, site2.conf) locally.
+
+Example: add support for index.php or update TLS settings.
+
+server {
+    listen 443 ssl;
+    server_name site1.com;
+    ssl_certificate /run/secrets/site1.crt;
+    ssl_certificate_key /run/secrets/site1.key;
+
+    location / {
+        root /usr/share/nginx/html/site1;
+        index index.html index.htm index.php;
+    }
+}
+
+Create New Configs
+Save updated configs with new names (e.g., site1-v2.conf, site2-v2.conf).
+
+Create them in Docker:
+
+docker config create site1-v2.conf site1.conf
+docker config create site2-v2.conf site2.conf
+
+Rotate Certificates (Secrets)
+When certs expire, generate new ones (site1-new.crt, site1-new.key).
+
+Create new secrets:
+
+docker secret create site1-new.crt site1-new.crt
+docker secret create site1-new.key site1-new.key
+
+Update Service
+Redeploy service with new configs and secrets:
+
+docker service update \
+  --config-rm site1.conf \
+  --config-add source=site1-v2.conf,target=/etc/nginx/conf.d/site1.conf,mode=0440 \
+  --secret-rm site1.crt \
+  --secret-rm site1.key \
+  --secret-add source=site1-new.crt,target=site1.crt \
+  --secret-add source=site1-new.key,target=site1.key \
+  nginx
+
+
+Verify Redeployment :
+
+Check service status:
+
+docker service ps nginx
+
+Test endpoints with updated certs:
+
+curl --cacert new-root-ca.crt https://site1.com
+
+curl --cacert new-root-ca.crt https://site2.com
+
+
+Clean Up Old Configs/Secrets
+Once redeployment is stable, remove old configs and secrets:
+
+docker config rm site1.conf site2.conf
+docker secret rm site1.crt site1.key site2.crt site2.key
+
+
+Single image, multiple sites → no need to rebuild images per domain.
+
+Secrets for TLS → secure handling of certificates.
+
+Configs for Nginx rules → flexible, immutable, versioned configuration.
+
+Scalability → easily add new domains by creating new secrets/configs and updating the stack.
+
+Zero downtime updates → services redeploy seamlessly.
+
+Immutable configs → ensures version control and rollback safety.
+
+Certificate rotation → keeps HTTPS secure and compliant.
+
+Multi‑site scalability → each domain can be updated independently.
